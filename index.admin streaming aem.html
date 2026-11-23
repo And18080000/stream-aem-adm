@@ -328,6 +328,24 @@ const isIos = () => /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCa
                         <button type="button" onclick="limparFormularioAdmin()" class="w-full sm:w-auto text-[10px] text-brand-text hover:text-white border border-white/10 px-4 py-2.5 sm:py-1 rounded-full transition uppercase font-bold text-center">Limpar / Novo</button>
                     </div>
                     
+<details id="batch-panel" class="mb-6 p-4 rounded-xl border border-white/10 bg-black/20" open>
+ <summary class="text-brand-gold font-bold cursor-pointer">Publicar um ou vários vídeos</summary>
+ <fieldset id="batch-fields" class="mt-4 grid gap-3">
+  <div class="grid sm:grid-cols-2 gap-3">
+   <label>Categoria<input id="batch-category" list="existing-categories" class="block w-full rounded bg-black p-2"></label>
+   <label>Classificação<input id="batch-rating" placeholder="Ex.: Livre" class="block w-full rounded bg-black p-2"></label>
+   <label>Selo<input id="batch-seal" value="A&amp;M ORIGINALS" class="block w-full rounded bg-black p-2"></label>
+   <label>Orientação e formato<select id="batch-format" class="block w-full rounded bg-black p-2"><option value="auto">Detectar por arquivo</option><option value="full">Vídeo normal</option><option value="short">Short vertical ou quadrado</option></select></label>
+   <label>Visibilidade dos novos envios<select id="batch-privacy" class="block w-full rounded bg-black p-2"><option value="unlisted">Não listado</option><option value="public">Público</option><option value="private">Privado</option></select></label>
+  </div>
+  <label>Selecionar arquivos de vídeo<input type="file" multiple accept="video/*" id="batch-files" class="block w-full"></label>
+  <label>Vídeos já no YouTube<textarea id="batch-links" placeholder="Um link por linha. Para Shorts, use o link /shorts/ ou selecione Short acima." class="block w-full rounded bg-black p-2"></textarea></label>
+  <button type="button" id="batch-add" class="rounded border border-white/20 p-2">Adicionar links à lista</button>
+  <div id="batch-list" class="grid gap-3"></div>
+  <button type="button" id="batch-send" class="rounded bg-[#D6B778] text-black p-3 font-bold">Publicar lista</button>
+ </fieldset>
+ <p id="batch-message" role="status" class="mt-2 text-sm"></p>
+</details>
                     <form id="form-conteudo" onsubmit="salvarConteudo(event)" class="flex flex-col gap-6 h-full">
                         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                             <div class="w-full">
@@ -1006,6 +1024,9 @@ const isIos = () => /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCa
             document.getElementById('upload-status-text').innerText = 'ENVIANDO DIRETAMENTE AO YOUTUBE...';
             try {
                 const isShort = document.getElementById('admin-video-format')?.value === 'short';
+                const preview = document.getElementById('admin-form-video-preview');
+                if (!preview.videoWidth || !Number.isFinite(preview.duration)) throw Error('Aguarde a leitura da duração e da orientação do arquivo.');
+                if (videoIsShort(preview.videoWidth,preview.videoHeight,preview.duration) !== (document.getElementById('admin-video-format').value==='short')) throw Error('Escolha o formato compatível com a orientação e a duração do arquivo.');
                 const uploaded = await uploadVideoToYoutube(file, { privacyStatus: document.getElementById('admin-privacy').value, title: document.getElementById('admin-titulo').value || file.name, description: document.getElementById('admin-descricao').value, isShort, onProgress: pct => { document.getElementById('upload-progress-bar').style.width = pct + '%'; document.getElementById('upload-pct-text').innerText = pct + '%'; btn.innerText = `ENVIANDO: ${pct}%`; } });
                 selectedVideoYoutubeUrl = uploaded.url;
                 window.showToast(isShort ? 'Short enviado ao seu YouTube. Salve o conteúdo para vinculá-lo.' : 'Vídeo enviado ao seu YouTube. Salve o conteúdo para vinculá-lo.');
@@ -1390,13 +1411,148 @@ const isIos = () => /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCa
             }
         }
 
+        const batchElement = id => document.getElementById('batch-' + id);
+        const batchItems = [];
+        let publishingBatch = false;
+        const titleFromFile = file => file.name.replace(/\.[^.]+$/, '').trim() || file.name;
+        const videoIsShort = (width, height, duration) => height >= width && duration <= 180;
+        function addBatchItem(file, youtubeId, linkedShort = false) {
+            if (batchItems.some(item => file ? item.file?.name === file.name && item.file.size === file.size && item.file.lastModified === file.lastModified : item.youtubeId === youtubeId)) return;
+            const row = document.createElement('article');
+            row.className = 'grid gap-2 rounded-xl bg-black/30 p-3';
+            row.innerHTML = '<strong></strong><div class="flex gap-3 flex-wrap"><video controls muted playsinline preload="metadata" class="w-40 rounded"></video><img hidden alt="Capa do catálogo" class="w-24 object-contain"></div><label>Capa no A&M <input type="file" accept="image/*"></label><button type="button" class="text-left underline">Usar quadro atual como capa</button><small role="status"></small><button type="button" class="text-left underline">Remover da lista</button>';
+            const [capture,remove] = row.querySelectorAll('button');
+            const media = row.querySelector('video'), poster = row.querySelector('img'), status = row.querySelector('small');
+            const item = {file,youtubeId,linkedShort,row,media,status,title:file ? titleFromFile(file) : '', ref:doc(collection(db,'artifacts',appId,'public','data','catalog'))};
+            batchItems.push(item);
+            batchElement('list').append(row);
+            row.querySelector('strong').textContent = item.title || youtubeId;
+            function setCover(blob) {
+                if (!blob || publishingBatch || item.done || !row.isConnected) return;
+                if (item.coverPreview) URL.revokeObjectURL(item.coverPreview);
+                item.cover = blob;
+                item.coverUrl = '';
+                item.coverPreview = URL.createObjectURL(blob);
+                poster.src = item.coverPreview;
+                poster.hidden = false;
+            }
+            row.querySelector('input').onchange = event => setCover(event.target.files[0]);
+            capture.onclick = () => {
+                if (media.readyState < 2) {status.textContent='Reproduza o vídeo e pause no quadro desejado.';return;}
+                const canvas=document.createElement('canvas');
+                canvas.width=media.videoWidth; canvas.height=media.videoHeight;
+                canvas.getContext('2d').drawImage(media,0,0);
+                canvas.toBlob(setCover,'image/jpeg',0.9);
+            };
+            remove.onclick = () => {
+                if (publishingBatch) return;
+                media.pause(); media.removeAttribute('src'); media.load();
+                for(const url of [item.preview,item.coverPreview]) if(url) URL.revokeObjectURL(url);
+                batchItems.splice(batchItems.indexOf(item),1); row.remove();
+            };
+            if (file) {
+                item.preview=URL.createObjectURL(file);
+                media.onloadedmetadata=()=>{status.textContent=media.videoWidth+' × '+media.videoHeight+' · '+Math.ceil(media.duration)+' s';};
+                media.onerror=()=>{status.textContent='O navegador não conseguiu ler o formato deste vídeo.';};
+                media.src=item.preview;
+            } else {
+                capture.hidden=true; media.hidden=true;
+                poster.src='https://i.ytimg.com/vi/'+youtubeId+'/hqdefault.jpg';poster.hidden=false;
+                fetchLinkedTitle(item).catch(err=>{status.textContent=err.message;});
+            }
+        }
+        async function fetchLinkedTitle(item) {
+            if(item.title)return;
+            if(!item.titleRequest) item.titleRequest=(async()=>{
+                const url='https://www.youtube.com/watch?v='+item.youtubeId;
+                const response=await fetch('https://www.youtube.com/oembed?format=json&url='+encodeURIComponent(url));
+                if(!response.ok) throw Error('Título indisponível. Confira se o link é público ou não listado.');
+                const info=await response.json();
+                if(!info.title?.trim())throw Error('O YouTube não retornou o título.');
+                item.title=info.title.trim();
+                item.row.querySelector('strong').textContent=item.title;
+                item.status.textContent='Vinculado ao YouTube';
+            })().finally(()=>{item.titleRequest=null;});
+            return item.titleRequest;
+        }
+        batchElement('files').onchange = event => {
+            for(const file of event.target.files) addBatchItem(file,'');
+            event.target.value='';
+        };
+        batchElement('add').onclick = () => {
+            const links=batchElement('links'), invalid=[];
+            for(const url of links.value.trim().split(/\s+/).filter(Boolean)){
+                const id=galleryYoutubeId(url);
+                if(id)addBatchItem(null,id,new URL(url).pathname.startsWith('/shorts/'));
+                else invalid.push(url);
+            }
+            links.value=invalid.join('\n');
+            batchElement('message').textContent=invalid.length?'Confira os links que ficaram no campo.':'';
+        };
+        batchElement('send').onclick = async () => {
+            if(publishingBatch)return;
+            const message=batchElement('message');
+            const pending=batchItems.filter(item=>!item.done);
+            const trilho=batchElement('category').value.trim(), subtitulo=batchElement('rating').value.trim(), selo=batchElement('seal').value.trim();
+            if(!currentUser || !pending.length || !trilho || !subtitulo || !selo){
+                message.textContent='Aguarde a autenticação, adicione vídeos e preencha categoria, classificação e selo.';return;
+            }
+            const format=batchElement('format').value, privacyStatus=batchElement('privacy').value;
+            publishingBatch=true;batchElement('fields').disabled=true;
+            try {
+                if(pending.some(item=>item.file && !item.youtubeId)) await ensureYoutubeIdentity();
+                for(const item of pending){
+                    try {
+                        const media=item.media;
+                        let short=item.linkedShort;
+                        if(item.file){
+                            if(!media.videoWidth || !media.videoHeight || !Number.isFinite(media.duration) || media.duration<=0)throw Error('Aguarde os metadados ou selecione um arquivo compatível.');
+                            short=videoIsShort(media.videoWidth,media.videoHeight,media.duration);
+                            if(format!=='auto' && (format==='short')!==short)throw Error('Formato incompatível com o arquivo. Confira a orientação e a duração ou use a detecção automática.');
+                        }else{
+                            await fetchLinkedTitle(item);
+                            if(format!=='auto')short=format==='short';
+                        }
+                        item.status.textContent='Preparando capa…';
+                        if(item.cover && !item.coverUrl){
+                            const key='capas/'+item.ref.id+'/capa';
+                            await getStorage().putObject({Bucket:'aem',Key:key,Body:item.cover,ContentType:item.cover.type}).promise();
+                            item.coverUrl='https://pub-a62c7f1bfc0248cab53121a7a3f99245.r2.dev/'+key;
+                        }
+                        if(!item.youtubeId){
+                            const uploaded=await uploadVideoToYoutube(item.file,{title:item.title,isShort:short,privacyStatus,onProgress:p=>{item.status.textContent='YouTube · '+p+'%';}});
+                            item.youtubeId=uploaded.id;
+                        }
+                        item.status.textContent='Salvando no catálogo…';
+                        const now=Date.now(), id=item.youtubeId;
+                        await setDoc(item.ref,{titulo:item.title,trilho,subtitulo,selo,orientacao:0,isShort:short,
+                            galleryFormat:(item.file ? media.videoHeight>=media.videoWidth : short)?'Vertical':'Horizontal',
+                            menuIds:[short?'menu2':'home'],videoUrl:'https://www.youtube.com/watch?v='+id,
+                            capaUrl:item.coverUrl || 'https://i.ytimg.com/vi/'+id+'/hqdefault.jpg',
+                            descricao:'',ownerId:currentUser.uid,createdAt:now,updatedAt:now});
+                        item.done=true;
+                        item.status.textContent='Cadastrado · '+(short?'Conteúdos':'Início');
+                        item.row.querySelector('input').disabled=true;
+                        item.row.querySelector('button').disabled=true;
+                    }catch(error){item.status.textContent=error.message || 'Falha ao publicar este item.';}
+                }
+                const count=batchItems.filter(item=>item.done).length;
+                message.textContent=count+' de '+batchItems.length+' cadastrados.'+(count<batchItems.length?' Confira os itens pendentes e tente novamente nesta página.':'');
+            }catch(error){message.textContent=error.message;}
+            finally{publishingBatch=false;batchElement('fields').disabled=false;}
+        };
         window.previewVideo = function(e) {
             const f = e.target.files[0];
             if (f) {
+                document.getElementById('admin-titulo').value = titleFromFile(f);
                 window.selectedVideoFile = f;
                 selectedVideoYoutubeUrl = '';
                 const videoUrl = URL.createObjectURL(f);
                 const formPreview = document.getElementById('admin-form-video-preview');
+                formPreview.onloadedmetadata = () => {
+                    document.getElementById('admin-video-format').value = videoIsShort(formPreview.videoWidth,formPreview.videoHeight,formPreview.duration) ? 'short' : 'full';
+                    formPreview.onloadedmetadata = null;
+                };
                 renderAdminVideoPreview(formPreview, videoUrl);
                 formPreview.play().catch(()=>{});
                 document.getElementById('preview-video-icon').classList.replace('ph-play', 'ph-check-circle');
@@ -1428,7 +1584,7 @@ const isIos = () => /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCa
             if (!currentUser) return showToast("Autenticando...", true);
             
             const coverImgEl = document.getElementById('preview-capa-img');
-            if (coverImgEl.classList.contains('hidden') && !editandoId) return showToast("Selecione uma capa.", true);
+            if (coverImgEl.classList.contains('hidden') && !editandoId && !selectedVideoYoutubeUrl) return showToast("Selecione uma capa.", true);
 
             const btn = document.getElementById('btn-salvar-conteudo');
             const progressContainer = document.getElementById('upload-progress-container');
@@ -1477,7 +1633,8 @@ const isIos = () => /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCa
                 } else {
                     payload.ownerId = currentUser.uid;
                     payload.createdAt = new Date().getTime();
-                    if (!payload.capaUrl) payload.capaUrl = coverImgEl.src;
+                    if (!payload.capaUrl) payload.capaUrl = coverImgEl.classList.contains('hidden') && finalVideoUrl
+                        ? 'https://i.ytimg.com/vi/'+galleryYoutubeId(finalVideoUrl)+'/hqdefault.jpg' : coverImgEl.src;
                     if (!payload.videoUrl) payload.videoUrl = "";
                     await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'catalog'), payload);
                     showToast("Conteúdo cadastrado com sucesso!");
@@ -1549,6 +1706,9 @@ const isIos = () => /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCa
         };
 
         const r2PublicOrigin = 'https://pub-a62c7f1bfc0248cab53121a7a3f99245.r2.dev';
+        function catalogText(value) {
+            return String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+        }
         function galleryYoutubeId(link){
             try {
                 const u = new URL(link);
@@ -1778,7 +1938,7 @@ const isIos = () => /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCa
                                 <div class="flex items-center gap-4">
                                     <span class="text-white font-bold w-4 text-center">${index + 1}</span>
                                     <img src="${item.capaUrl}" class="w-14 h-9 object-cover rounded shadow">
-                                    <p class="text-xs text-white font-medium truncate max-w-[150px]">${item.titulo}</p>
+                                    <p class="text-xs text-white font-medium truncate max-w-[150px]">${catalogText(item.titulo)}</p>
                                     <div class="flex flex-wrap gap-1">${badgeHTML}</div>
                                 </div>
                                 <button onclick="event.stopPropagation(); excluirConteudo('${item.id}')" class="text-brand-text hover:text-red-500 transition px-2">
@@ -1795,7 +1955,7 @@ const isIos = () => /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCa
                 if(itensConteudo.length > 0) {
                     selectOptions += `<optgroup label="✨ CATEGORIA: CONTEÚDOS (TIKTOK)">`;
                     itensConteudo.forEach(item => {
-                        selectOptions += `<option value="${item.id}">${item.titulo} [CONTEÚDOS] 🔥</option>`;
+                        selectOptions += `<option value="${item.id}">${catalogText(item.titulo)} [CONTEÚDOS] 🔥</option>`;
                     });
                     selectOptions += `</optgroup>`;
                 }
@@ -1806,7 +1966,7 @@ const isIos = () => /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCa
                     selectOptions += `<optgroup label="TRILHO: ${cat.toUpperCase()}">`;
                     catalogoPorCategoria[cat].forEach(item => {
                         const tags = item.menuIds ? item.menuIds.map(m => `[${menuLabels[m] || m.toUpperCase()}]`).join(' ') : '[S/ MENU]';
-                        selectOptions += `<option value="${item.id}">${item.titulo} ${tags}</option>`;
+                        selectOptions += `<option value="${item.id}">${catalogText(item.titulo)} ${tags}</option>`;
                     });
                     selectOptions += `</optgroup>`;
                 });
@@ -1839,12 +1999,17 @@ const isIos = () => /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCa
         window.previewMetaVideo = function(e) {
             const f = e.target.files[0];
             if (f) {
+                document.getElementById('meta-titulo').value = titleFromFile(f);
                 selectedMetaVideoFile = f;
                 selectedMetaVideoYoutubeUrl = '';
                 
                 // Preview Visual do novo vídeo carregado
                 const videoUrl = URL.createObjectURL(f);
                 const previewEl = document.getElementById('meta-video-preview');
+                previewEl.onloadedmetadata = () => {
+                    document.getElementById('meta-video-format').value = videoIsShort(previewEl.videoWidth,previewEl.videoHeight,previewEl.duration) ? 'short' : 'full';
+                    previewEl.onloadedmetadata = null;
+                };
                 renderAdminVideoPreview(previewEl, videoUrl);
                 previewEl.play().catch(()=>{});
                 document.getElementById('meta-video-icon').classList.add('hidden');
@@ -1859,6 +2024,9 @@ const isIos = () => /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCa
             if (!selectedMetaVideoFile) return showToast('Selecione o vídeo principal primeiro.', true);
             const btn = document.getElementById('btn-send-meta-youtube'); btn.disabled = true;
             try {
+                const preview = document.getElementById('meta-video-preview');
+                if (!preview.videoWidth || !Number.isFinite(preview.duration)) throw Error('Aguarde a leitura da duração e da orientação do arquivo.');
+                if (videoIsShort(preview.videoWidth,preview.videoHeight,preview.duration) !== (document.getElementById('meta-video-format').value==='short')) throw Error('Escolha o formato compatível com a orientação e a duração do arquivo.');
                 const out = await uploadVideoToYoutube(selectedMetaVideoFile, { privacyStatus: document.getElementById('meta-privacy').value, title: document.getElementById('meta-titulo').value || selectedMetaVideoFile.name, isShort: document.getElementById('meta-video-format').value === 'short', onProgress: pct => { document.getElementById('upload-meta-video-progress').classList.remove('hidden'); document.getElementById('upload-meta-video-bar').style.width = pct + '%'; btn.innerText = `ENVIANDO: ${pct}%`; } });
                 selectedMetaVideoYoutubeUrl = out.url;
                 document.getElementById('meta-video-status').innerText = 'Enviado ao YouTube. Salve os metadados para vincular.';
