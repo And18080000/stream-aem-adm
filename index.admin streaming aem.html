@@ -126,6 +126,7 @@ const isIos = () => /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCa
                 <button onclick="navigate('gallery')" id="nav-gallery" class="nav-link pb-1">GALERIA</button>
                 <button onclick="navigate('admin')" id="nav-admin" class="nav-link active pb-1 hover:text-white transition">CATÁLOGO & CONFIG</button>
                 <button onclick="navigate('ads')" id="nav-ads" class="nav-link pb-1 hover:text-white transition">METADADOS & CLIENTES</button>
+                <button onclick="navigate('leads')" id="nav-leads" class="nav-link pb-1">LEADS</button>
                 <button onclick="navigate('publicidade')" id="nav-publicidade" class="nav-link pb-1">PROPAGANDAS</button><button onclick="navigate('cloud')" id="nav-cloud" class="nav-link pb-1 hover:text-white transition uppercase">Armazenamento R2</button>
             </nav>
         </div>
@@ -137,6 +138,15 @@ const isIos = () => /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCa
     <p id="admin-service-status" role="status" class="text-center text-sm">Conectando aos serviços do painel…</p>
     <main class="flex-grow pt-6 md:pt-8 pb-12">
         
+        <section id="view-leads" class="hidden max-w-[1200px] mx-auto px-4">
+            <h2 class="text-2xl font-bold">Leads</h2>
+            <div class="workpanel">
+                <label for="lead-filter" class="block mb-2">Buscar por nome, e-mail ou telefone</label>
+                <input id="lead-filter" type="search" class="w-full rounded-lg bg-black p-3" autocomplete="off">
+                <p id="lead-status" role="status" class="my-3 text-sm text-brand-text">Carregando contatos…</p>
+                <ul id="lead-list" class="grid gap-3 md:grid-cols-2"></ul>
+            </div>
+        </section>
         <section id="view-gallery" class="hidden max-w-[1400px] mx-auto px-4">
 <h1 class="font-bold text-2xl mb-4">Galeria do portfólio</h1>
 <div class="flex flex-wrap items-end gap-3 mb-4"><label>Categoria<select class="block bg-brand-panel p-2 rounded" id="galleryCategory"></select></label>
@@ -1008,6 +1018,7 @@ const isIos = () => /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCa
             document.getElementById('view-ads').classList.add('hidden');
             document.getElementById('view-publicidade').classList.add('hidden');
             document.getElementById('view-cloud').classList.add('hidden');
+            document.getElementById('view-leads').classList.add('hidden');
             document.getElementById('view-gallery').classList.add('hidden');
             document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
             
@@ -1015,6 +1026,7 @@ const isIos = () => /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCa
             if(targetView) {
                 targetView.classList.remove('hidden');
                 document.getElementById(`nav-${viewId}`).classList.add('active');
+                if(viewId === 'leads') renderLeadDirectory();
                 if(viewId === 'cloud') carregarArquivosR2();
             }
             window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -2170,13 +2182,102 @@ const isIos = () => /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCa
             `).join('');
         }
 
+        const leadSources = { leads: 'loading', profiles: 'loading' };
+        const leadFilter = document.getElementById('lead-filter');
+        leadFilter.addEventListener('input', renderLeadDirectory);
+
+        function whatsappDigits(value) {
+            const raw = String(value || '').trim();
+            let digits = raw.replace(/\D/g, '');
+            if (raw.startsWith('00')) digits = digits.slice(2);
+            else if (!raw.startsWith('+') && /^\d{10,11}$/.test(digits)) digits = '55' + digits;
+            return /^[1-9]\d{7,14}$/.test(digits) ? digits : '';
+        }
+
+        function renderLeadDirectory() {
+            if (document.getElementById('view-leads').classList.contains('hidden')) return;
+            const contacts = new Map();
+            const records = [...cacheUsuariosSite, ...cacheLeads];
+            const emailsByPhone = new Map();
+            for (const row of records) {
+                const phone = whatsappDigits(row.telefone);
+                const email = String(row.email || '').trim().toLowerCase();
+                if (phone && email) {
+                    if (!emailsByPhone.has(phone)) emailsByPhone.set(phone, new Set());
+                    emailsByPhone.get(phone).add(email);
+                }
+            }
+            for (const row of records) {
+                const email = String(row.email || '').trim();
+                const phone = whatsappDigits(row.telefone);
+                const matches = emailsByPhone.get(phone);
+                const key = email.toLowerCase() || (matches?.size === 1 && [...matches][0]) || phone || row.id;
+                if (!row.nome && !email && !row.telefone) continue;
+                const contact = contacts.get(key) || {};
+                contact.name ||= String(row.nome || '').trim();
+                contact.email ||= email;
+                contact.phone ||= String(row.telefone || '').trim();
+                contacts.set(key, contact);
+            }
+            const normalize = text => text.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+            const query = normalize(leadFilter.value.trim());
+            const digits = /^[\d\s()+-]+$/.test(query) && query.replace(/\D/g, '');
+            const list = document.getElementById('lead-list');
+            list.replaceChildren();
+            for (const c of [...contacts.values()].sort((a,b) => a.name.localeCompare(b.name, 'pt-BR'))) {
+                const number = whatsappDigits(c.phone);
+                if (!normalize([c.name,c.email,c.phone].join(' ')).includes(query) && !(digits && number.includes(digits))) continue;
+                const card = document.createElement('li');
+                card.className = 'rounded-xl border border-gray-700 bg-black/30 p-4';
+                function line(tag, value, classes) {
+                    const el = document.createElement(tag);
+                    el.textContent = value;
+                    el.className = classes;
+                    card.append(el);
+                    return el;
+                }
+                line('strong', c.name || 'Nome não informado', 'block break-words');
+                line('p', c.email || 'E-mail não informado', 'text-sm break-all mt-2');
+                line('p', c.phone || 'Telefone não informado', 'text-sm mt-1');
+                if (c.email) {
+                    const button = line('button', 'Copiar e-mail', 'text-brand-gold underline mr-4 mt-3');
+                    button.type = 'button';
+                    button.onclick = async () => {
+                        try {
+                            await navigator.clipboard.writeText(c.email);
+                            window.showToast('E-mail copiado.');
+                        } catch { window.showToast('Selecione o e-mail no cartão e copie manualmente.', true); }
+                    };
+                }
+                if (number) {
+                    const link = line('a', 'Abrir WhatsApp', 'inline-block text-brand-gold underline mt-3');
+                    link.href = 'https://wa.me/' + number;
+                    link.target = '_blank';
+                    link.rel = 'noopener noreferrer';
+                }
+                list.append(card);
+            }
+            const states = Object.values(leadSources);
+            const count = list.childElementCount;
+            document.getElementById('lead-status').textContent = [
+                count ? count + (count === 1 ? ' contato' : ' contatos') : states.includes('loading') ? '' : query ? 'Nenhum contato corresponde à busca.' : states.includes('error') ? '' : 'Nenhum lead cadastrado.',
+                states.includes('error') ? 'Falha ao carregar dados de contatos. Atualize a página para tentar novamente.' : states.includes('loading') ? 'Carregando contatos…' : ''
+            ].filter(Boolean).join(' · ');
+        }
+
+        function leadSourceChanged(key, state) {
+            leadSources[key] = state;
+            renderLeadDirectory();
+        }
+
         // 3. Sistema Unificado de Clientes
         window.carregarUsuariosRealtime = function() {
             // Escuta a coleção de leads em tempo real para capturar solicitações de remoção de ads
             onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'leads'), (snap) => {
                 cacheLeads = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+                leadSourceChanged('leads', 'ready');
                 renderListaDeClientesAds();
-            });
+            }, () => leadSourceChanged('leads', 'error'));
 
             onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'user_registrations'), (snap) => {
                 let usersList = snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a,b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0));
@@ -2187,8 +2288,9 @@ const isIos = () => /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCa
                     u.role !== 'admin'
                 );
 
+                leadSourceChanged('profiles', 'ready');
                 renderListaDeClientesAds();
-            });
+            }, () => leadSourceChanged('profiles', 'error'));
         }
         
         function renderListaDeClientesAds() {
