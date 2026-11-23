@@ -126,7 +126,7 @@ const isIos = () => /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCa
                 <button onclick="navigate('gallery')" id="nav-gallery" class="nav-link pb-1">GALERIA</button>
                 <button onclick="navigate('admin')" id="nav-admin" class="nav-link active pb-1 hover:text-white transition">CATÁLOGO & CONFIG</button>
                 <button onclick="navigate('ads')" id="nav-ads" class="nav-link pb-1 hover:text-white transition">METADADOS & CLIENTES</button>
-                <button onclick="navigate('cloud')" id="nav-cloud" class="nav-link pb-1 hover:text-white transition uppercase">Armazenamento R2</button>
+                <button onclick="navigate('publicidade')" id="nav-publicidade" class="nav-link pb-1">PROPAGANDAS</button><button onclick="navigate('cloud')" id="nav-cloud" class="nav-link pb-1 hover:text-white transition uppercase">Armazenamento R2</button>
             </nav>
         </div>
         <div class="hidden md:flex items-center gap-3 md:gap-5">
@@ -588,7 +588,26 @@ const isIos = () => /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCa
                 <!-- COLUNA DIREITA: Anúncios e Gestão de Clientes -->
                 <div class="flex flex-col gap-8 h-full w-full">
                     
-                    <!-- Bloco 1: Gestão de Propagandas -->
+                    <!-- Bloco 2: Gestão de Clientes e Liberação de Ads -->
+                    <div class="bg-[#15171C] rounded-[24px] p-5 md:p-8 shadow-2xl flex flex-col border border-white/5 flex-grow w-full">
+                        <div class="flex justify-between items-center mb-4">
+                            <h2 class="text-white text-xl md:text-2xl font-bold flex items-center gap-2">
+                                <i class="ph ph-users-three text-brand-blue"></i> Clientes do Site
+                            </h2>
+                        </div>
+                        <p class="text-[10px] text-brand-text mb-6 uppercase tracking-widest leading-relaxed">Controle o acesso sem propagandas (Ad-Free) para contas cadastradas com E-mail e Senha.</p>
+
+                        <div id="clients-ads-list" class="space-y-3 overflow-y-auto max-h-[350px] pr-2 admin-scroll w-full">
+                            <!-- Preenchido via JS -->
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+        </section>
+
+        <!-- VIEW: BANCO DE DADOS GOLD R2 -->
+        <section id="view-publicidade" class="hidden max-w-5xl mx-auto px-4">                    <!-- Bloco 1: Gestão de Propagandas -->
                     <div class="bg-[#15171C] rounded-[24px] p-5 md:p-8 shadow-2xl flex flex-col border border-white/5 w-full">
                         <div class="flex flex-col sm:flex-row justify-between sm:items-center mb-6 gap-3">
                             <h2 class="text-brand-gold text-xl md:text-2xl font-bold font-sans flex items-center gap-2">
@@ -614,7 +633,7 @@ const isIos = () => /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCa
                                 <button onclick="document.getElementById('upload-ad-video').click()" class="w-full sm:w-auto bg-brand-blue hover:bg-brand-blue-hover text-white px-6 py-3.5 sm:py-3 rounded-xl font-bold text-sm whitespace-nowrap shadow-md flex items-center justify-center gap-2 transition">
                                     <i class="ph ph-upload-simple text-xl"></i> Selecionar anúncio
                                 </button>
-                                <label class="text-[10px] text-brand-text font-bold uppercase w-full sm:max-w-48">Formato<select id="ad-video-format" class="mt-1 w-full p-2.5 rounded-lg bg-black/40 text-white text-xs"><option value="full">Vídeo normal</option><option value="short">Short vertical</option></select></label><label class="block text-sm">Visibilidade no YouTube<select id="ad-privacy" class="block w-full rounded bg-black p-2"><option value="unlisted">Não listado (apenas com link)</option><option value="public">Público</option><option value="private">Privado</option></select></label>
+                                <label class="block text-xs">Tempo em tela (segundos)<input id="newAdDuration" type="number" min="1" step="1" value="15" class="block bg-black rounded p-2"></label><label class="text-[10px] text-brand-text font-bold uppercase w-full sm:max-w-48">Formato<select id="ad-video-format" class="mt-1 w-full p-2.5 rounded-lg bg-black/40 text-white text-xs"><option value="full">Vídeo normal</option><option value="short">Short vertical</option></select></label><label class="block text-sm">Visibilidade no YouTube<select id="ad-privacy" class="block w-full rounded bg-black p-2"><option value="unlisted">Não listado (apenas com link)</option><option value="public">Público</option><option value="private">Privado</option></select></label>
                                 <button type="button" id="btn-send-ad-youtube" onclick="iniciarUploadAdVideo()" class="w-full sm:w-auto bg-red-600 hover:bg-red-500 text-white px-6 py-3.5 sm:py-3 rounded-xl font-bold text-sm">Enviar anúncio ao YouTube</button>
                                 <span id="ad-upload-status" class="text-xs text-brand-text hidden mt-2 sm:mt-3">Enviando: <span id="ad-upload-pct" class="font-bold text-brand-gold">0%</span></span>
                             </div>
@@ -631,25 +650,7 @@ const isIos = () => /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCa
                         </div>
                     </div>
 
-                    <!-- Bloco 2: Gestão de Clientes e Liberação de Ads -->
-                    <div class="bg-[#15171C] rounded-[24px] p-5 md:p-8 shadow-2xl flex flex-col border border-white/5 flex-grow w-full">
-                        <div class="flex justify-between items-center mb-4">
-                            <h2 class="text-white text-xl md:text-2xl font-bold flex items-center gap-2">
-                                <i class="ph ph-users-three text-brand-blue"></i> Clientes do Site
-                            </h2>
-                        </div>
-                        <p class="text-[10px] text-brand-text mb-6 uppercase tracking-widest leading-relaxed">Controle o acesso sem propagandas (Ad-Free) para contas cadastradas com E-mail e Senha.</p>
-
-                        <div id="clients-ads-list" class="space-y-3 overflow-y-auto max-h-[350px] pr-2 admin-scroll w-full">
-                            <!-- Preenchido via JS -->
-                        </div>
-                    </div>
-
-                </div>
-            </div>
-        </section>
-
-        <!-- VIEW: BANCO DE DADOS GOLD R2 -->
+</section>
         <section id="view-cloud" class="hidden w-full max-w-[1400px] mx-auto px-4 md:px-8">
             <div class="bg-[#15171C] rounded-[24px] p-5 md:p-8 shadow-2xl border border-white/5 w-full">
                 <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-6">
@@ -1005,6 +1006,7 @@ const isIos = () => /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCa
         window.navigate = function(viewId) {
             document.getElementById('view-admin').classList.add('hidden');
             document.getElementById('view-ads').classList.add('hidden');
+            document.getElementById('view-publicidade').classList.add('hidden');
             document.getElementById('view-cloud').classList.add('hidden');
             document.getElementById('view-gallery').classList.add('hidden');
             document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
@@ -1260,7 +1262,14 @@ const isIos = () => /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCa
             });
         }
 
+        window.moveCategory=(button,dir)=>{
+            const row=button.closest('.category-item-drag'), sibling=dir<0?row.previousElementSibling:row.nextElementSibling;
+            if(!sibling)return;
+            if(dir<0)sibling.before(row);else sibling.after(row);
+            [...row.parentElement.querySelectorAll('.input-ordem-cat')].forEach((el,i)=>el.value=i+1);
+        };
         function renderListaOrdem(categoriasArray) {
+            categoriasArray=[...new Set([...categoriasArray,...Object.keys(rooms),...cacheCatalogo.flatMap(itemCategories)])];
             const container = document.getElementById('admin-ordem-categorias-list');
             if (container) {
                 // Ordena o array com base no cache antes do render
@@ -1292,7 +1301,7 @@ const isIos = () => /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCa
 
                         <div class="flex flex-col gap-2 mt-1">
                             <div class="flex items-center justify-between gap-3">
-                                <label class="text-[10px] text-brand-text font-bold">Ordem:</label>
+                                <label class="text-[10px] text-brand-text font-bold">Ordem:</label><button type="button" onclick="moveCategory(this,-1)" aria-label="Mover categoria para cima">↑</button><button type="button" onclick="moveCategory(this,1)" aria-label="Mover categoria para baixo">↓</button>
                                 <input type="number" data-cat="${cat}" value="${ordemAtual}" class="input-ordem-cat flex-grow w-full bg-black/40 text-brand-gold text-sm p-2 rounded-lg border border-white/10 text-center font-bold outline-none focus:border-brand-gold">
                             </div>
                             <label class="flex items-center gap-2 cursor-pointer justify-center w-full mt-2 bg-black/20 p-2 rounded-lg border border-white/5">
@@ -1305,6 +1314,7 @@ const isIos = () => /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCa
 
                 // Inicializa o Motor de Arraste (SortableJS)
                 if (window.Sortable) {
+                    window.Sortable.get(container)?.destroy();
                     new Sortable(container, {
                         animation: 200,
                         handle: '.category-item-drag',
@@ -2075,7 +2085,7 @@ const isIos = () => /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCa
             btn.disabled = true;
             try {
                 const uploaded = await uploadVideoToYoutube(f, { privacyStatus: document.getElementById('ad-privacy').value, title: f.name.replace(/\.[^.]+$/, ''), isShort: document.getElementById('ad-video-format').value === 'short', onProgress: pct => { document.getElementById('ad-progress-bar').style.width = pct + '%'; document.getElementById('ad-upload-pct').innerText = pct + '%'; btn.innerText = `ENVIANDO: ${pct}%`; } });
-                const novoAd = { id: Date.now().toString(), url: uploaded.url, nome: f.name, isShort: uploaded.isShort, adicionadoEm: Date.now(), ordem: cacheAnunciosVideos.length + 1, duracao: 15, inicio: '', fim: '' };
+                const novoAd = { id: Date.now().toString(), url: uploaded.url, nome: f.name, isShort: uploaded.isShort, adicionadoEm: Date.now(), ordem: cacheAnunciosVideos.length + 1, duracao: Math.max(1,parseInt(document.getElementById('newAdDuration').value)||15), inicio: '', fim: '' };
                 await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'configuracoes', 'anuncios'), { videos: [...cacheAnunciosVideos, novoAd] }, { merge: true });
                 selectedAdFile = null; document.getElementById('upload-ad-video').value = '';
                 showToast(uploaded.isShort ? 'Short de anúncio enviado e vinculado.' : 'Anúncio enviado ao YouTube e publicado.');
@@ -2094,7 +2104,8 @@ const isIos = () => /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCa
 
         window.salvarEdicaoAnuncio = async function(id) {
             const ordem = parseInt(document.getElementById(`ad-ordem-${id}`).value) || 1;
-            const duracao = parseInt(document.getElementById(`ad-duracao-${id}`).value) || 15;
+            const duracao = Number(document.getElementById(`ad-duracao-${id}`).value);
+            if(!Number.isInteger(duracao)||duracao<1)return showToast('Informe o tempo em segundos inteiros, a partir de 1.',true);
             const inicio = document.getElementById(`ad-inicio-${id}`).value;
             const fim = document.getElementById(`ad-fim-${id}`).value;
 
