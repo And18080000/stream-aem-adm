@@ -196,6 +196,8 @@ const isIos = () => /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCa
                 <p class="text-xs text-brand-text mb-4">Use o mesmo Client ID OAuth do projeto Google liberado para seu canal. Esta configuração pertence somente ao streaming e não conecta este site à plataforma de cursos. O envio acontece do navegador para o YouTube, como não listado.</p>
                 <div class="flex flex-col sm:flex-row gap-3"><input id="youtube-client-id" type="text" autocomplete="off" placeholder="Client ID OAuth terminado em .apps.googleusercontent.com" class="w-full p-3 rounded-xl bg-black/30 text-white text-sm border border-white/10"><button type="button" onclick="salvarIntegracaoYoutube()" class="shrink-0 bg-red-600 hover:bg-red-500 text-white px-6 py-3 rounded-xl font-bold text-sm">Salvar conexão</button></div>
                 <details class="mt-4"><summary>Gerenciar vídeo enviado</summary><label class="block mt-3">Link do vídeo ou Short<input id="managedLink" class="w-full bg-black p-2" type="url"></label><label class="block text-sm">Visibilidade no YouTube<select id="managed-privacy" class="block w-full rounded bg-black p-2"><option value="unlisted">Não listado (apenas com link)</option><option value="public">Público</option><option value="private">Privado</option></select></label><button id="changePrivacy" class="p-2 underline">Atualizar visibilidade</button><button id="checkVideo" class="p-2 underline">Consultar processamento</button></details>
+<label class="block text-sm mt-4">Conta preferida para o YouTube<input id="youtubeHint" type="email" class="block w-full bg-black p-2 rounded"></label><button id="rememberYoutube" type="button" class="underline text-sm">Salvar conta neste navegador</button>
+<button type="button" id="deleteManaged" class="block text-red-400 underline mt-3">Excluir do YouTube o vídeo do link informado</button>
 <p id="ytResult" class="text-sm mt-2" aria-live="polite"></p><p id="youtube-connection-status" class="text-[11px] text-brand-text mt-3">Carregando configuração...</p><p class="text-[10px] text-brand-text mt-2">A origem HTTPS deste painel também precisa estar autorizada no Google Cloud. Não cole Client Secret. Projetos Google ainda não auditados podem restringir envios à privacidade.</p>
             </div>
 
@@ -718,7 +720,7 @@ const isIos = () => /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCa
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, collection, addDoc, onSnapshot, deleteDoc, doc, setDoc, getDoc, getDocs, updateDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, runTransaction, collection, addDoc, onSnapshot, deleteDoc, doc, setDoc, getDoc, getDocs, updateDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // CREDENCIAIS DA A&M
         const firebaseConfig = {
@@ -895,27 +897,41 @@ const isIos = () => /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCa
             }
         };
 
+        const youtubeSessions=new Map();
+        const hintInput=document.getElementById('youtubeHint');
+        let preferredAccount=localStorage.getItem('aem.youtube.account') ?? 'aem.producoes.visuais@gmail.com';
+        hintInput.value=preferredAccount;
+        document.getElementById('rememberYoutube').onclick=()=>{
+            if(!hintInput.reportValidity())return;
+            preferredAccount=hintInput.value.trim();localStorage.setItem('aem.youtube.account',preferredAccount);
+            youtubeSessions.clear();showToast('Preferência salva neste navegador.');
+        };
         async function ensureYoutubeIdentity(scope = 'https://www.googleapis.com/auth/youtube.upload') {
             if (!youtubeClientId) throw new Error('Configure o Client ID OAuth do YouTube nos ajustes do painel.');
+            const key=youtubeClientId+'|'+preferredAccount+'|'+scope;
+            const cached=youtubeSessions.get(key);
+            if(cached && Date.now()<cached.until)return cached.token;
             const oauth = window.google?.accounts?.oauth2;
             if (!oauth) throw Error('A autorização Google ainda não carregou. Aguarde e clique novamente. Se persistir, confira se o navegador permite accounts.google.com.');
             return new Promise((resolve,reject) => {
                 const client = oauth.initTokenClient({
-                    client_id: youtubeClientId, scope,
+                    client_id: youtubeClientId, scope, ...(preferredAccount ? {login_hint:preferredAccount}:{}),
                     callback: response => {
                         if (response.error || !response.access_token) return reject(Error(response.error_description || response.error || 'Falha ao autorizar a conta.'));
                         if (!oauth.hasGrantedAllScopes(response,scope)) return reject(Error('A permissão solicitada não foi concedida. Tente novamente e marque a permissão do YouTube.'));
+                        youtubeSessions.set(key,{token:response.access_token,until:Date.now()+Math.max(0,Number(response.expires_in)-90)*1000});
                         resolve(response.access_token);
                     },
                     error_callback: error => reject(Error(error.type === 'popup_failed_to_open'
                         ? 'O navegador bloqueou a janela. Permita pop-ups para este painel e clique novamente.'
                         : error.type === 'popup_closed' ? 'A janela foi fechada antes de concluir a autorização.' : 'Falha ao abrir a autorização Google.'))
                 });
-                client.requestAccessToken({prompt:'select_account consent'});
+                client.requestAccessToken({prompt:preferredAccount?'':'select_account'});
             });
         }
 
         function uploadError(status,body){
+            if(status===401)youtubeSessions.clear();
             const e=body?.error || {};
             const reason=e.errors?.[0]?.reason || e.status || '';
             const hint=reason==='youtubeSignupRequired' ? 'Selecione uma conta com canal ativo no YouTube.' :
@@ -1423,7 +1439,7 @@ const isIos = () => /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCa
                 if (finalVideoUrl) { payload.videoUrl = finalVideoUrl; payload.isShort = document.getElementById('admin-video-format')?.value === 'short'; }
 
                 if (editandoId) {
-                    await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'catalog', editandoId), payload);
+                    await saveReplacement(editandoId,payload);
                     showToast("Conteúdo atualizado no Firebase!");
                 } else {
                     payload.ownerId = currentUser.uid;
@@ -1661,10 +1677,42 @@ const isIos = () => /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCa
                 const a=document.createElement('a');a.href='https://www.youtube.com/playlist?list='+encodeURIComponent(playlist.id);a.textContent='Ver playlist';a.target='_blank';a.rel='noopener';status.append(a);
             } catch(e){status.textContent='Sincronização pendente. '+e.message;} finally{this.disabled=false;}
         };
+        const removeDialog=document.getElementById('deleteYoutubeDialog');
+        function offerRemoval(link,title){
+            const id=galleryYoutubeId(link);
+            if(!id)return showToast('Informe o link de um vídeo ou Short do YouTube.',true);
+            const uses=cacheCatalogo.filter(i=>[i.videoUrl,i.trailerUrl,...(i.trailers || []).map(t=>t.url)].some(v=>galleryYoutubeId(v)===id)).length;
+            document.getElementById('deleteYoutubeInfo').textContent=title+' · '+id+'. O vídeo será apagado do canal, inclusive em outros sites que usam esse link.'+(uses?' Referências no catálogo: '+uses+'.':'');
+            document.getElementById('deleteYoutubeStatus').textContent='';
+            removeDialog.dataset.videoId=id; removeDialog.showModal();
+        }
+        document.getElementById('deleteManaged').onclick=()=>offerRemoval(document.getElementById('managedLink').value,'Vídeo selecionado');
+        document.getElementById('deleteYoutubeConfirm').onclick=async function(){
+            const id=removeDialog.dataset.videoId;this.disabled=true;
+            const out=document.getElementById('deleteYoutubeStatus');
+            try{
+                const token=await ensureYoutubeIdentity('https://www.googleapis.com/auth/youtube.force-ssl');
+                const r=await fetch('https://www.googleapis.com/youtube/v3/videos?id='+encodeURIComponent(id),{method:'DELETE',headers:{Authorization:'Bearer '+token}});
+                if(!r.ok)throw uploadError(r.status,await r.json().catch(()=>({})));
+                removeDialog.close();showToast('Vídeo excluído do canal.');
+            } catch(err){out.textContent=err.message;} finally{this.disabled=false;}
+        };
+        async function saveReplacement(id,payload){
+            const ref=doc(db,'artifacts',appId,'public','data','catalog',id);
+            const old=await runTransaction(db,async tx=>{
+                const snap=await tx.get(ref);
+                if(!snap.exists())throw Error('O conteúdo já não existe.');
+                tx.update(ref,payload);return snap.data();
+            });
+            if(payload.videoUrl && galleryYoutubeId(old.videoUrl) && galleryYoutubeId(old.videoUrl)!==galleryYoutubeId(payload.videoUrl))
+                offerRemoval(old.videoUrl,'Substituição salva. Vídeo anterior de '+(old.titulo || 'conteúdo'));
+        }
         window.excluirConteudo = async function(id) {
-            if(!confirm("Remover este conteúdo do catálogo? A mídia continuará armazenada no YouTube ou R2.")) return;
+            const item=cacheCatalogo.find(i=>i.id===id);
+            if(!confirm('Remover este conteúdo do catálogo?'))return;
             await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'catalog', id));
             showToast("Conteúdo excluído.");
+            if(galleryYoutubeId(item?.videoUrl))offerRemoval(item.videoUrl,item.titulo);
         }
 
         window.carregarCatalogoRealtime = function() {
@@ -1949,7 +1997,7 @@ const isIos = () => /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCa
                 if(finalVideoUrl && selectedMetaVideoFile) payload.isShort = document.getElementById('meta-video-format').value === 'short';
 
                 // Executa a atualização do documento existente
-                await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'catalog', id), payload);
+                await saveReplacement(id,payload);
                 
                 showToast("Metadados, Vídeo e Trailer atualizados com sucesso!");
                 
@@ -2333,51 +2381,3 @@ const isIos = () => /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCa
 
                 // Cálculos de Gigabytes
                 const totalGB = (totalBytes / 1e9).toFixed(3);
-                document.getElementById('r2Measured').textContent=totalBytes.toLocaleString('pt-BR')+' bytes · '+files.length+' objetos · '+new Date().toLocaleTimeString('pt-BR');
-                usageText.innerText = totalGB;
-                
-                showToast(`Base Gold R2 Atualizada! Consumo: ${totalGB} GB`);
-
-                // Porcentagem baseada em 10GB (Free Tier comum do R2)
-                const pct = Math.min(100, (parseFloat(totalGB) / 10) * 100).toFixed(1);
-                usagePct.innerText = pct + '%';
-                usageBar.style.width = pct + '%';
-
-            } catch (err) {
-                console.error(err);
-                document.getElementById("r2Measured").textContent="Falha na atualização. Última medição pode estar desatualizada.";
-                showToast("Erro ao listar ficheiros do Cloud R2.", true);
-            } finally {refreshingR2=false;}
-        };
-
-        window.excluirArquivoR2Silencioso = async function(url) {
-            try {
-                const parsed = new URL(String(url || ''));
-                if (parsed.hostname !== 'pub-a62c7f1bfc0248cab53121a7a3f99245.r2.dev') return false;
-                const key = decodeURIComponent(parsed.pathname.replace(/^\//, ''));
-                if (!key) return false;
-                await s3.deleteObject({ Bucket: 'aem', Key: key }).promise();
-                return true;
-            } catch (error) { console.error('Falha ao excluir objeto R2:', error); throw error; }
-        };
-
-        window.excluirArquivoR2 = async function(encodedKey) {
-            let key = '';
-            try { key = decodeURIComponent(encodedKey); } catch { key = String(encodedKey || ''); }
-            if (!key) return showToast('Arquivo inválido.', true);
-            if(!confirm(`Tem a certeza que deseja EXCLUIR DEFINITIVAMENTE o ficheiro "${key}" do servidor R2? Esta ação não pode ser desfeita.`)) return;
-            
-            try {
-                const params = { Bucket: "aem", Key: key };
-                await s3.deleteObject(params).promise();
-                showToast("Arquivo excluído do bucket Cloudflare R2.");
-                await carregarArquivosR2();
-            } catch(e) {
-                console.error('Erro ao excluir objeto R2:', e);
-                showToast(e?.message || "Erro ao excluir do R2. Confira as permissões de exclusão do bucket.", true);
-            }
-        };
-
-    </script>
-</body>
-</html>
