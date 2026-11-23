@@ -134,6 +134,7 @@ const isIos = () => /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCa
         </div>
     </header>
 
+    <p id="admin-service-status" role="status" class="text-center text-sm">Conectando aos serviços do painel…</p>
     <main class="flex-grow pt-6 md:pt-8 pb-12">
         
         <section id="view-gallery" class="hidden max-w-[1400px] mx-auto px-4">
@@ -704,17 +705,41 @@ const isIos = () => /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCa
     <div id="auth-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
         <div class="bg-[#15171C] border border-brand-gold/30 rounded-3xl w-full max-w-md p-8 shadow-2xl relative mx-4">
             <h2 class="text-brand-gold text-lg font-bold mb-4 uppercase tracking-wide text-center">Acesso Restrito - Admin</h2>
-            <form onsubmit="handleLogin(event)" class="flex flex-col gap-4">
+            <form id="admin-login-form" class="flex flex-col gap-4">
                 <div class="relative w-full mb-2">
                     <input type="password" id="admin-pwd" placeholder="Senha do Sistema..." required class="w-full px-5 py-4 pr-12 rounded-xl bg-[#2A2C33] border-2 border-transparent text-white outline-none focus:border-brand-gold transition text-base">
-                    <button type="button" onclick="toggleAdminPassword()" class="absolute right-4 top-1/2 -translate-y-1/2 text-brand-text hover:text-brand-gold transition focus:outline-none p-2 rounded-lg">
+                    <button type="button" id="admin-password-toggle" aria-label="Mostrar senha" class="absolute right-4 top-1/2 -translate-y-1/2 text-brand-text hover:text-brand-gold transition focus:outline-none p-2 rounded-lg">
                         <i id="icon-admin-pass" class="ph ph-eye text-2xl"></i>
                     </button>
                 </div>
+                <p id="admin-login-message" role="alert" class="text-red-400 text-sm"></p>
                 <button type="submit" class="w-full bg-[#D6B778] text-black py-4 rounded-xl font-black text-lg hover:bg-[#e8c989] transition shadow-lg tracking-wider">AUTENTICAR</button>
             </form>
         </div>
     </div>
+
+    <script>
+    (() => {
+        const modal = document.getElementById('auth-modal');
+        const password = document.getElementById('admin-pwd');
+        const message = document.getElementById('admin-login-message');
+        const toggle = document.getElementById('admin-password-toggle');
+        toggle.onclick = () => {
+            const reveal = password.type === 'password';
+            password.type = reveal ? 'text' : 'password';
+            toggle.setAttribute('aria-label', reveal ? 'Ocultar senha' : 'Mostrar senha');
+            document.getElementById('icon-admin-pass').className = 'ph '+(reveal ? 'ph-eye-slash' : 'ph-eye')+' text-2xl';
+        };
+        document.getElementById('admin-login-form').onsubmit = event => {
+            event.preventDefault();
+            if(password.value !== '123456'){
+                message.textContent='Senha incorreta. Tente novamente.';
+                password.focus();password.select();return;
+            }
+            password.value='';message.textContent='';modal.hidden=true;modal.classList.add('hidden');
+        };
+    })();
+    </script>
 
     <!-- SCRIPTS -->
     <script type="module">
@@ -737,7 +762,10 @@ const isIos = () => /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCa
         const appId = firebaseConfig.appId;
 
        // AWS R2
-        const s3 = new window.AWS.S3({
+        let storageClient;
+        function getStorage(){
+            if(!window.AWS?.S3) throw Error('Cloud R2 indisponível. Recarregue o painel para tentar novamente.');
+            return storageClient ??= new window.AWS.S3({
             endpoint: 'https://679ab4032c53de6dee298b613e90e0db.r2.cloudflarestorage.com',
             accessKeyId: '69e552e54ff90a1e889b60d52b7554b6',
             secretAccessKey: 'c3628552b794067bd258cb7c2777b6614ebe28f57ae3d763b7d55cc02fda99b1',
@@ -746,6 +774,8 @@ const isIos = () => /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCa
             s3ForcePathStyle: true,
             httpOptions: { timeout: 0 } // PREVINE QUEDA DE CONEXÃO EM VÍDEOS GIGANTES
         });
+
+        }
 
         // VARIÁVEIS GLOBAIS
         let currentUser = null;
@@ -776,11 +806,12 @@ const isIos = () => /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCa
         window.catLogosFiles = {};
 
         // AUTH
-        const initAuth = async () => { try { await signInAnonymously(auth); } catch (e) {} };
+        const initAuth = async () => { try { await signInAnonymously(auth); } catch (e) { document.getElementById('admin-service-status').textContent='Falha ao conectar ao Firebase. Recarregue a página para tentar novamente.'; } };
         initAuth();
         onAuthStateChanged(auth, (user) => {
             currentUser = user;
             if (user) {
+                document.getElementById('admin-service-status').textContent='';
                 carregarBrandingRealtime();
                 carregarMenusRealtime();
                 carregarOrdemELogosCategorias();
@@ -795,26 +826,6 @@ const isIos = () => /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCa
                 }, () => maintenanceSwitch.textContent = 'Falha ao consultar disponibilidade');
             }
         });
-
-        window.toggleAdminPassword = () => {
-            const passInput = document.getElementById('admin-pwd');
-            const icon = document.getElementById('icon-admin-pass');
-            if (passInput.type === 'password') {
-                passInput.type = 'text';
-                icon.classList.replace('ph-eye', 'ph-eye-slash');
-            } else {
-                passInput.type = 'password';
-                icon.classList.replace('ph-eye-slash', 'ph-eye');
-            }
-        };
-
-        window.handleLogin = (e) => {
-            e.preventDefault();
-            if(document.getElementById('admin-pwd').value === '123456') { 
-                document.getElementById('auth-modal').classList.add('hidden');
-                showToast("Acesso Liberado!");
-            } else { showToast("Senha incorreta", true); }
-        };
 
         window.showToast = (msg, isError = false) => {
             const t = document.getElementById('toast');
@@ -1034,7 +1045,7 @@ const isIos = () => /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCa
                     showToast("Subindo novo logo...");
                     const ext = selectedAppLogoFile.name.split('.').pop();
                     const fileName = `branding/${Date.now()}_logo.${ext}`;
-                    await s3.putObject({ Bucket: "aem", Key: fileName, Body: selectedAppLogoFile, ContentType: selectedAppLogoFile.type }).promise();
+                    await getStorage().putObject({ Bucket: "aem", Key: fileName, Body: selectedAppLogoFile, ContentType: selectedAppLogoFile.type }).promise();
                     finalLogoUrl = `https://pub-a62c7f1bfc0248cab53121a7a3f99245.r2.dev/${fileName}`;
                 }
 
@@ -1109,7 +1120,7 @@ const isIos = () => /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCa
                         const f = window.menuLogosFiles[i];
                         const ext = f.name.split('.').pop();
                         const fileName = `branding/${Date.now()}_menu${i}.${ext}`;
-                        await s3.putObject({ Bucket: "aem", Key: fileName, Body: f, ContentType: f.type }).promise();
+                        await getStorage().putObject({ Bucket: "aem", Key: fileName, Body: f, ContentType: f.type }).promise();
                         window.menuLogosUrls[i] = `https://pub-a62c7f1bfc0248cab53121a7a3f99245.r2.dev/${fileName}`;
                         window.menuLogosFiles[i] = null;
                     }
@@ -1206,7 +1217,7 @@ const isIos = () => /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCa
                         const ext = f.name.split('.').pop();
                         const safeName = btoa(encodeURIComponent(cat)).replace(/[^a-zA-Z0-9]/g, '').substring(0,10);
                         const fileName = `branding/${Date.now()}_cat_${safeName}.${ext}`;
-                        await s3.putObject({ Bucket: "aem", Key: fileName, Body: f, ContentType: f.type }).promise();
+                        await getStorage().putObject({ Bucket: "aem", Key: fileName, Body: f, ContentType: f.type }).promise();
                         window.cacheLogosCategorias[cat] = `https://pub-a62c7f1bfc0248cab53121a7a3f99245.r2.dev/${fileName}`;
                     }
                 }
@@ -1414,7 +1425,7 @@ const isIos = () => /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCa
                     progressContainer.classList.remove('hidden');
                     const ext = window.selectedCoverFile.name.split('.').pop();
                     const fileName = `capas/${Date.now()}_img.${ext}`;
-                    await s3.putObject({ Bucket: "aem", Key: fileName, Body: window.selectedCoverFile, ContentType: window.selectedCoverFile.type }).promise();
+                    await getStorage().putObject({ Bucket: "aem", Key: fileName, Body: window.selectedCoverFile, ContentType: window.selectedCoverFile.type }).promise();
                     finalCapaUrl = `https://pub-a62c7f1bfc0248cab53121a7a3f99245.r2.dev/${fileName}`;
                     progressBar.style.width = '20%'; progressText.innerText = '20%';
                 }
@@ -1563,7 +1574,7 @@ const isIos = () => /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCa
                 if(file){
                     if(!/^(image|video)\//.test(file.type)) throw Error('Selecione uma imagem ou vídeo.');
                     const key='categorias/'+crypto.randomUUID()+'_'+file.name;
-                    await s3.upload({Bucket:'aem',Key:key,Body:file,ContentType:file.type}).promise();
+                    await getStorage().upload({Bucket:'aem',Key:key,Body:file,ContentType:file.type}).promise();
                     room.banner=r2PublicOrigin+'/'+key.split('/').map(encodeURIComponent).join('/');
                     room.type=file.type.startsWith('video/')?'video':'image';
                 }
@@ -1593,7 +1604,7 @@ const isIos = () => /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCa
                 protectedKeys.forEach(k=>keys.delete(k));
                 if(!confirm('Excluir definitivamente '+catalog.size+' conteúdos, todas as categorias e anúncios e '+keys.size+' objetos vinculados do R2?')) return;
                 let count=0;
-                for(const key of keys){await s3.deleteObject({Bucket:'aem',Key:key}).promise();output.textContent='Removendo mídias: '+(++count)+' / '+keys.size;}
+                for(const key of keys){await getStorage().deleteObject({Bucket:'aem',Key:key}).promise();output.textContent='Removendo mídias: '+(++count)+' / '+keys.size;}
                 for(const d of catalog.docs) await deleteDoc(d.ref);
                 for(const d of settings) if(d.exists()) await deleteDoc(d.ref);
                 output.textContent='Catálogo limpo. '+count+' objetos removidos do R2.';
@@ -1965,7 +1976,7 @@ const isIos = () => /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCa
                     btn.innerText = "SUBINDO NOVA CAPA...";
                     const ext = selectedMetaCoverFile.name.split('.').pop();
                     const fileName = `capas/${Date.now()}_meta_img.${ext}`;
-                    await s3.putObject({ Bucket: "aem", Key: fileName, Body: selectedMetaCoverFile, ContentType: selectedMetaCoverFile.type }).promise();
+                    await getStorage().putObject({ Bucket: "aem", Key: fileName, Body: selectedMetaCoverFile, ContentType: selectedMetaCoverFile.type }).promise();
                     finalCoverUrl = `https://pub-a62c7f1bfc0248cab53121a7a3f99245.r2.dev/${fileName}`;
                 }
 
@@ -2286,7 +2297,7 @@ const isIos = () => /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCa
             const files = [];
             let next;
             do {
-                const page = await s3.listObjectsV2({Bucket:'aem',ContinuationToken:next}).promise();
+                const page = await getStorage().listObjectsV2({Bucket:'aem',ContinuationToken:next}).promise();
                 files.push(...(page.Contents || []));
                 next = page.NextContinuationToken;
             } while(next);
@@ -2307,7 +2318,7 @@ const isIos = () => /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCa
                 (ads.data()?.videos || []).forEach(v => add(v.url));
                 const files = (await listR2()).filter(f => refs.has(f.Key) && /\.(mp4|webm|mov|mkv|avi|m4v|mpeg|mpg|m2ts|mts|wmv)$/i.test(f.Key) && !/^(capas|branding)\//i.test(f.Key));
                 if(files.length && !confirm('Excluir permanentemente '+files.length+' vídeos do R2? Os links antigos deixarão de reproduzir.')) return;
-                for(const f of files){ await s3.deleteObject({Bucket:'aem',Key:f.Key}).promise(); report.textContent = ++removed+' de '+files.length+' excluídos.'; }
+                for(const f of files){ await getStorage().deleteObject({Bucket:'aem',Key:f.Key}).promise(); report.textContent = ++removed+' de '+files.length+' excluídos.'; }
                 report.textContent = removed+' arquivos de vídeo excluídos.';
                 await carregarArquivosR2();
             } catch(e){ report.textContent = removed+' excluídos. Falha: '+e.message; }
@@ -2381,3 +2392,51 @@ const isIos = () => /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCa
 
                 // Cálculos de Gigabytes
                 const totalGB = (totalBytes / 1e9).toFixed(3);
+                document.getElementById('r2Measured').textContent=totalBytes.toLocaleString('pt-BR')+' bytes · '+files.length+' objetos · '+new Date().toLocaleTimeString('pt-BR');
+                usageText.innerText = totalGB;
+                
+                showToast(`Base Gold R2 Atualizada! Consumo: ${totalGB} GB`);
+
+                // Porcentagem baseada em 10GB (Free Tier comum do R2)
+                const pct = Math.min(100, (parseFloat(totalGB) / 10) * 100).toFixed(1);
+                usagePct.innerText = pct + '%';
+                usageBar.style.width = pct + '%';
+
+            } catch (err) {
+                console.error(err);
+                document.getElementById("r2Measured").textContent="Falha na atualização. Última medição pode estar desatualizada.";
+                showToast("Erro ao listar ficheiros do Cloud R2.", true);
+            } finally {refreshingR2=false;}
+        };
+
+        window.excluirArquivoR2Silencioso = async function(url) {
+            try {
+                const parsed = new URL(String(url || ''));
+                if (parsed.hostname !== 'pub-a62c7f1bfc0248cab53121a7a3f99245.r2.dev') return false;
+                const key = decodeURIComponent(parsed.pathname.replace(/^\//, ''));
+                if (!key) return false;
+                await getStorage().deleteObject({ Bucket: 'aem', Key: key }).promise();
+                return true;
+            } catch (error) { console.error('Falha ao excluir objeto R2:', error); throw error; }
+        };
+
+        window.excluirArquivoR2 = async function(encodedKey) {
+            let key = '';
+            try { key = decodeURIComponent(encodedKey); } catch { key = String(encodedKey || ''); }
+            if (!key) return showToast('Arquivo inválido.', true);
+            if(!confirm(`Tem a certeza que deseja EXCLUIR DEFINITIVAMENTE o ficheiro "${key}" do servidor R2? Esta ação não pode ser desfeita.`)) return;
+            
+            try {
+                const params = { Bucket: "aem", Key: key };
+                await getStorage().deleteObject(params).promise();
+                showToast("Arquivo excluído do bucket Cloudflare R2.");
+                await carregarArquivosR2();
+            } catch(e) {
+                console.error('Erro ao excluir objeto R2:', e);
+                showToast(e?.message || "Erro ao excluir do R2. Confira as permissões de exclusão do bucket.", true);
+            }
+        };
+
+    </script>
+<dialog id="deleteYoutubeDialog" class="m-auto rounded-xl bg-brand-panel text-white p-5 max-w-md"><form method="dialog"><h2 class="font-bold">Excluir permanentemente do YouTube?</h2><p id="deleteYoutubeInfo" class="my-3"></p><output id="deleteYoutubeStatus" aria-live="polite"></output><div class="flex gap-4 mt-4"><button value="cancel">Fechar</button><button type="button" id="deleteYoutubeConfirm" class="bg-red-700 rounded px-3 py-2">Autorizar exclusão</button></div></form></dialog></body>
+</html>
