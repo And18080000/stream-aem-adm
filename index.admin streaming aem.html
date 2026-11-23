@@ -106,7 +106,7 @@
 let dP; window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); dP = e; const b = document.createElement('button'); b.innerHTML = '<svg style="width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2;margin-right:6px" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg> Instalar App'; b.style.cssText = 'position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:99999;background:#3b82f6;color:#fff;border:none;padding:12px 24px;border-radius:50px;font-family:sans-serif;font-weight:600;font-size:14px;box-shadow:0 4px 20px rgba(59,130,246,0.4);cursor:pointer;display:flex;align-items:center;white-space:nowrap;transition:transform 0.2s;'; b.onclick = async () => { if (!dP) return; dP.prompt(); const { outcome } = await dP.userChoice; if (outcome === 'accepted') b.remove(); dP = null; }; document.body.appendChild(b); });
 const isIos = () => /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCase()); const isStandalone = () => ('standalone' in window.navigator) && window.navigator.standalone; if (isIos() && !isStandalone()) { const ib = document.createElement('div'); ib.innerHTML = 'Para instalar como App: toque em <b>Compartilhar</b> e depois <b>Adicionar ao Ecrã Principal</b><button style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;color:#a1a1aa;font-size:16px;" onclick="this.parentElement.remove()">✕</button>'; ib.style.cssText = 'position:fixed;bottom:0;left:0;width:100%;background:#1c1e2b;color:#fff;padding:15px 30px 15px 15px;font-family:sans-serif;font-size:12px;text-align:center;z-index:99999;border-top:1px solid #2b2d3a;box-shadow:0 -5px 15px rgba(0,0,0,0.2);'; setTimeout(() => document.body.appendChild(ib), 2000); }
 </script>
-<style>main :is(.flex-1,.flex-grow,.grid > *){min-width:0}main input,main select,main textarea{max-width:100%}main label{overflow-wrap:anywhere} @media(max-width:680px){main .backdrop-blur-xl{backdrop-filter:none} main button{white-space:normal}}</style><style>.workpanel{border:1px solid #343941;background:#15191f;border-radius:12px;padding:1rem;margin:1rem 0}.workpanel summary{font-weight:650;cursor:pointer}.workpanel form{margin-top:1rem}.room-form{display:grid;gap:1rem;max-width:50rem}.workpanel input,.workpanel textarea{display:block;background:#090b0e;color:white;border:1px solid #434952;padding:.6rem;border-radius:6px;width:100%}.workbutton{border-radius:8px;background:#d6b778;color:black;padding:.65rem 1rem;margin:.5rem 0}.danger{background:#8e3038;color:white}#view-gallery h2{display:flex;align-items:center;justify-content:space-between;gap:1rem}#form-metadados{gap:1rem}#form-metadados details>div{margin-top:.75rem}#site-preview-iframe{background:#171a20}header nav button{min-height:42px}</style></head>
+<style>main :is(.flex-1,.flex-grow,.grid > *){min-width:0}main input,main select,main textarea{max-width:100%}main label{overflow-wrap:anywhere} @media(max-width:680px){main .backdrop-blur-xl{backdrop-filter:none} main button{white-space:normal}}</style><style>.workpanel{border:1px solid #343941;background:#15191f;border-radius:12px;padding:1rem;margin:1rem 0}.workpanel summary{font-weight:650;cursor:pointer}.workpanel form{margin-top:1rem}.room-form{display:grid;gap:1rem;max-width:50rem}.workpanel input,.workpanel textarea{display:block;background:#090b0e;color:white;border:1px solid #434952;padding:.6rem;border-radius:6px;width:100%}.workbutton{border-radius:8px;background:#d6b778;color:black;padding:.65rem 1rem;margin:.5rem 0}.danger{background:#8e3038;color:white}#view-gallery h2{display:flex;align-items:center;justify-content:space-between;gap:1rem}#form-metadados{gap:1rem}#form-metadados details>div{margin-top:.75rem}#site-preview-iframe{background:#171a20}header nav button{min-height:42px}</style><script async src="https://accounts.google.com/gsi/client"></script></head>
 <body class="antialiased flex flex-col min-h-screen">
 
     <!-- Toast de Notificação -->
@@ -897,20 +897,30 @@ const isIos = () => /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCa
 
         async function ensureYoutubeIdentity(scope = 'https://www.googleapis.com/auth/youtube.upload') {
             if (!youtubeClientId) throw new Error('Configure o Client ID OAuth do YouTube nos ajustes do painel.');
-            if (!window.google?.accounts?.oauth2) {
-                await new Promise((resolve, reject) => {
-                    const existing = document.querySelector('script[data-youtube-identity]');
-                    if (existing) { existing.addEventListener('load', resolve, { once: true }); existing.addEventListener('error', () => reject(new Error('Não foi possível carregar a autorização Google.')), { once: true }); return; }
-                    const script = document.createElement('script'); script.src = 'https://accounts.google.com/gsi/client'; script.async = true; script.defer = true; script.dataset.youtubeIdentity = '1';
-                    script.onload = resolve; script.onerror = () => reject(new Error('Não foi possível carregar a autorização Google.')); document.head.appendChild(script);
+            const oauth = window.google?.accounts?.oauth2;
+            if (!oauth) throw Error('A autorização Google ainda não carregou. Aguarde e clique novamente. Se persistir, confira se o navegador permite accounts.google.com.');
+            return new Promise((resolve,reject) => {
+                const client = oauth.initTokenClient({
+                    client_id: youtubeClientId, scope,
+                    callback: response => {
+                        if (response.error || !response.access_token) return reject(Error(response.error_description || response.error || 'Falha ao autorizar a conta.'));
+                        if (!oauth.hasGrantedAllScopes(response,scope)) return reject(Error('A permissão solicitada não foi concedida. Tente novamente e marque a permissão do YouTube.'));
+                        resolve(response.access_token);
+                    },
+                    error_callback: error => reject(Error(error.type === 'popup_failed_to_open'
+                        ? 'O navegador bloqueou a janela. Permita pop-ups para este painel e clique novamente.'
+                        : error.type === 'popup_closed' ? 'A janela foi fechada antes de concluir a autorização.' : 'Falha ao abrir a autorização Google.'))
                 });
-            }
-            return await new Promise((resolve, reject) => {
-                try {
-                    const client = window.google.accounts.oauth2.initTokenClient({ client_id: youtubeClientId, scope, callback: response => response?.access_token ? resolve(response.access_token) : reject(new Error(response?.error_description || 'A conta Google não autorizou o envio.')), error_callback: () => reject(new Error('A autorização Google foi fechada ou bloqueada.')) });
-                    client.requestAccessToken({ prompt: 'select_account' });
-                } catch (error) { reject(error); }
+                client.requestAccessToken({prompt:'select_account consent'});
             });
+        }
+
+        function uploadError(status,body){
+            const e=body?.error || {};
+            const reason=e.errors?.[0]?.reason || e.status || '';
+            const hint=reason==='youtubeSignupRequired' ? 'Selecione uma conta com canal ativo no YouTube.' :
+                status===401 ? 'Autorize novamente com a conta que controla o canal.' : '';
+            return new Error(['YouTube '+status,reason,e.message,hint].filter(Boolean).join(' · '));
         }
 
         async function uploadVideoToYoutube(file, { title, privacyStatus = 'unlisted', description = '', isShort = false, onProgress = () => {} } = {}) {
@@ -922,7 +932,7 @@ const isIos = () => /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCa
                 headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json; charset=UTF-8', 'X-Upload-Content-Length': String(file.size), 'X-Upload-Content-Type': mime },
                 body: JSON.stringify({ snippet: { title: String(title || file.name).trim().slice(0, 100), description: String(description || '').slice(0, 5000), categoryId: '22', tags: isShort ? ['Shorts'] : [] }, status: { privacyStatus, embeddable: true, selfDeclaredMadeForKids: false } })
             });
-            if (!response.ok) { const detail = await response.json().catch(() => ({})); throw new Error(detail.error?.message || `O YouTube recusou o início do envio (${response.status}).`); }
+            if (!response.ok) { const detail = await response.json().catch(() => ({})); throw uploadError(response.status,detail); }
             const sessionUrl = response.headers.get('Location');
             if (!sessionUrl) throw new Error('O Google não retornou a sessão de envio. Confira a origem OAuth e a API do YouTube.');
             let offset = 0, result = null;
@@ -937,8 +947,8 @@ const isIos = () => /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCa
                     xhr.onload = () => {
                         if (xhr.status === 308) { const range = xhr.getResponseHeader('Range')?.match(/bytes=0-(\d+)/); const next = range ? Number(range[1]) + 1 : 0; if (next <= offset || next > end) return reject(new Error('O YouTube não confirmou o bloco enviado.')); offset = next; return resolve(null); }
                         if (xhr.status >= 200 && xhr.status < 300) { try { offset = file.size; return resolve(JSON.parse(xhr.responseText)); } catch { return reject(new Error('Resposta inválida do YouTube.')); } }
-                        let message = ''; try { message = JSON.parse(xhr.responseText).error?.message || ''; } catch {}
-                        reject(new Error(message || `Falha no envio (${xhr.status}).`));
+                        let detail = {}; try { detail = JSON.parse(xhr.responseText); } catch {}
+                        reject(uploadError(xhr.status,detail));
                     };
                     xhr.send(file.slice(offset, end));
                 });
