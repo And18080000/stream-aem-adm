@@ -106,7 +106,13 @@
 let dP; window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); dP = e; const b = document.createElement('button'); b.innerHTML = '<svg style="width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2;margin-right:6px" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg> Instalar App'; b.style.cssText = 'position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:99999;background:#3b82f6;color:#fff;border:none;padding:12px 24px;border-radius:50px;font-family:sans-serif;font-weight:600;font-size:14px;box-shadow:0 4px 20px rgba(59,130,246,0.4);cursor:pointer;display:flex;align-items:center;white-space:nowrap;transition:transform 0.2s;'; b.onclick = async () => { if (!dP) return; dP.prompt(); const { outcome } = await dP.userChoice; if (outcome === 'accepted') b.remove(); dP = null; }; document.body.appendChild(b); });
 const isIos = () => /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCase()); const isStandalone = () => ('standalone' in window.navigator) && window.navigator.standalone; if (isIos() && !isStandalone()) { const ib = document.createElement('div'); ib.innerHTML = 'Para instalar como App: toque em <b>Compartilhar</b> e depois <b>Adicionar ao Ecrã Principal</b><button style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;color:#a1a1aa;font-size:16px;" onclick="this.parentElement.remove()">✕</button>'; ib.style.cssText = 'position:fixed;bottom:0;left:0;width:100%;background:#1c1e2b;color:#fff;padding:15px 30px 15px 15px;font-family:sans-serif;font-size:12px;text-align:center;z-index:99999;border-top:1px solid #2b2d3a;box-shadow:0 -5px 15px rgba(0,0,0,0.2);'; setTimeout(() => document.body.appendChild(ib), 2000); }
 </script>
-<style>main :is(.flex-1,.flex-grow,.grid > *){min-width:0}main input,main select,main textarea{max-width:100%}main label{overflow-wrap:anywhere} @media(max-width:680px){main .backdrop-blur-xl{backdrop-filter:none} main button{white-space:normal}}</style><style>.workpanel{border:1px solid #343941;background:#15191f;border-radius:12px;padding:1rem;margin:1rem 0}.workpanel summary{font-weight:650;cursor:pointer}.workpanel form{margin-top:1rem}.room-form{display:grid;gap:1rem;max-width:50rem}.workpanel input,.workpanel textarea{display:block;background:#090b0e;color:white;border:1px solid #434952;padding:.6rem;border-radius:6px;width:100%}.workbutton{border-radius:8px;background:#d6b778;color:black;padding:.65rem 1rem;margin:.5rem 0}.danger{background:#8e3038;color:white}#view-gallery h2{display:flex;align-items:center;justify-content:space-between;gap:1rem}#form-metadados{gap:1rem}#form-metadados details>div{margin-top:.75rem}#site-preview-iframe{background:#171a20}header nav button{min-height:42px}</style><script async src="https://accounts.google.com/gsi/client"></script></head>
+<style>main :is(.flex-1,.flex-grow,.grid > *){min-width:0}main input,main select,main textarea{max-width:100%}main label{overflow-wrap:anywhere} @media(max-width:680px){main .backdrop-blur-xl{backdrop-filter:none} main button{white-space:normal}}</style><style>.workpanel{border:1px solid #343941;background:#15191f;border-radius:12px;padding:1rem;margin:1rem 0}.workpanel summary{font-weight:650;cursor:pointer}.workpanel form{margin-top:1rem}.room-form{display:grid;gap:1rem;max-width:50rem}.workpanel input,.workpanel textarea{display:block;background:#090b0e;color:white;border:1px solid #434952;padding:.6rem;border-radius:6px;width:100%}.workbutton{border-radius:8px;background:#d6b778;color:black;padding:.65rem 1rem;margin:.5rem 0}.danger{background:#8e3038;color:white}#view-gallery h2{display:flex;align-items:center;justify-content:space-between;gap:1rem}#form-metadados{gap:1rem}#form-metadados details>div{margin-top:.75rem}#site-preview-iframe{background:#171a20}header nav button{min-height:42px}</style><script async src="https://accounts.google.com/gsi/client"></script><style>
+body.batch-active #form-conteudo,body.batch-active #individual-new,
+#batch-progress[hidden],#batch-finish[hidden]{display:none!important}
+#batch-bar{width:100%;height:12px;accent-color:#d6b778}
+#batch-progress{padding:12px;background:#20232b;border-radius:10px}
+#batch-stage{overflow-wrap:anywhere}
+</style></head>
 <body class="antialiased flex flex-col min-h-screen">
 
     <!-- Toast de Notificação -->
@@ -325,7 +331,7 @@ const isIos = () => /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCa
                 <div class="lg:col-span-5 bg-[#15171C] rounded-[24px] p-5 md:p-8 shadow-2xl flex flex-col border border-white/5">
                     <div class="flex flex-col sm:flex-row justify-between sm:items-center gap-4 mb-6">
                         <h2 class="text-[#D6B778] text-xl md:text-2xl font-bold font-sans">Cadastrar Conteúdo</h2>
-                        <button type="button" onclick="limparFormularioAdmin()" class="w-full sm:w-auto text-[10px] text-brand-text hover:text-white border border-white/10 px-4 py-2.5 sm:py-1 rounded-full transition uppercase font-bold text-center">Limpar / Novo</button>
+                        <button type="button" id="individual-new" onclick="limparFormularioAdmin()" class="w-full sm:w-auto text-[10px] text-brand-text hover:text-white border border-white/10 px-4 py-2.5 sm:py-1 rounded-full transition uppercase font-bold text-center">Limpar / Novo</button>
                     </div>
                     
 <details id="batch-panel" class="mb-6 p-4 rounded-xl border border-white/10 bg-black/20" open>
@@ -342,7 +348,13 @@ const isIos = () => /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCa
   <label>Vídeos já no YouTube<textarea id="batch-links" placeholder="Um link por linha. Para Shorts, use o link /shorts/ ou selecione Short acima." class="block w-full rounded bg-black p-2"></textarea></label>
   <button type="button" id="batch-add" class="rounded border border-white/20 p-2">Adicionar links à lista</button>
   <div id="batch-list" class="grid gap-3"></div>
+  <section id="batch-progress" hidden>
+   <label for="batch-bar">Progresso da publicação · <span id="batch-percent">0%</span></label>
+   <progress id="batch-bar" value="0" max="100"></progress>
+   <p id="batch-count"></p><p id="batch-stage" role="status"></p>
+  </section>
   <button type="button" id="batch-send" class="rounded bg-[#D6B778] text-black p-3 font-bold">Publicar lista</button>
+  <button type="button" id="batch-finish" class="underline" hidden>Concluir e fechar lista</button>
  </fieldset>
  <p id="batch-message" role="status" class="mt-2 text-sm"></p>
 </details>
@@ -1414,6 +1426,30 @@ const isIos = () => /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCa
         const batchElement = id => document.getElementById('batch-' + id);
         const batchItems = [];
         let publishingBatch = false;
+        let batchStarted = false;
+        function refreshBatch() {
+            const total = batchItems.length;
+            const published = batchItems.filter(item => item.done).length;
+            const failed = batchItems.filter(item => item.failed).length;
+            const completed = total > 0 && published === total;
+            document.body.classList.toggle('batch-active', total > 0);
+            batchElement('finish').hidden = !completed || publishingBatch;
+            batchElement('send').disabled = publishingBatch || completed;
+            batchElement('send').textContent = publishingBatch ? 'Publicando…' : completed ? 'Lista publicada' : failed ? 'Publicar pendentes' : 'Publicar lista';
+            if (!total) batchStarted = false;
+            batchElement('progress').hidden = !batchStarted;
+            const units = batchItems.reduce((sum,item) => sum + (item.done ? 100 : item.progress || 0), 0);
+            const percent = total ? Math.floor(units / total) : 0;
+            batchElement('bar').value = percent;
+            batchElement('percent').textContent = percent + '%';
+            batchElement('count').textContent = published + ' de ' + total + ' publicados no catálogo · ' + failed + ' com erro';
+            if (!publishingBatch) batchElement('stage').textContent = completed ? 'Publicação concluída.' : failed ? 'Confira os erros na lista.' : '';
+        }
+        batchElement('finish').onclick = () => {
+            if (publishingBatch || batchItems.some(item => !item.done)) return;
+            for (const item of [...batchItems]) item.remove();
+            batchElement('message').textContent = '';
+        };
         const titleFromFile = file => file.name.replace(/\.[^.]+$/, '').trim() || file.name;
         const videoIsShort = (width, height, duration) => height >= width && duration <= 180;
         function addBatchItem(file, youtubeId, linkedShort = false) {
@@ -1425,6 +1461,8 @@ const isIos = () => /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCa
             const media = row.querySelector('video'), poster = row.querySelector('img'), status = row.querySelector('small');
             const item = {file,youtubeId,linkedShort,row,media,status,title:file ? titleFromFile(file) : '', ref:doc(collection(db,'artifacts',appId,'public','data','catalog'))};
             batchItems.push(item);
+            batchElement('message').textContent='';
+            refreshBatch();
             batchElement('list').append(row);
             row.querySelector('strong').textContent = item.title || youtubeId;
             function setCover(blob) {
@@ -1444,11 +1482,13 @@ const isIos = () => /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCa
                 canvas.getContext('2d').drawImage(media,0,0);
                 canvas.toBlob(setCover,'image/jpeg',0.9);
             };
-            remove.onclick = () => {
+            remove.onclick = item.remove = () => {
                 if (publishingBatch) return;
                 media.pause(); media.removeAttribute('src'); media.load();
                 for(const url of [item.preview,item.coverPreview]) if(url) URL.revokeObjectURL(url);
                 batchItems.splice(batchItems.indexOf(item),1); row.remove();
+                batchElement('message').textContent='';
+                refreshBatch();
             };
             if (file) {
                 item.preview=URL.createObjectURL(file);
@@ -1498,11 +1538,18 @@ const isIos = () => /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCa
                 message.textContent='Aguarde a autenticação, adicione vídeos e preencha categoria, classificação e selo.';return;
             }
             const format=batchElement('format').value, privacyStatus=batchElement('privacy').value;
-            publishingBatch=true;batchElement('fields').disabled=true;
+            publishingBatch=true;batchStarted=true;batchElement('fields').disabled=true;
+            message.textContent='';
+            for(const item of pending){item.failed=false;item.progress=0;item.status.textContent='Na fila';}
+            batchElement('stage').textContent='Preparando a publicação…';
+            refreshBatch();
             try {
                 if(pending.some(item=>item.file && !item.youtubeId)) await ensureYoutubeIdentity();
                 for(const item of pending){
                     try {
+                        const label = item.title || item.youtubeId;
+                        const stage = text => {item.status.textContent=text;batchElement('stage').textContent=label+' · '+text;};
+                        stage('Verificando vídeo…');
                         const media=item.media;
                         let short=item.linkedShort;
                         if(item.file){
@@ -1513,17 +1560,18 @@ const isIos = () => /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCa
                             await fetchLinkedTitle(item);
                             if(format!=='auto')short=format==='short';
                         }
-                        item.status.textContent='Preparando capa…';
+                        stage('Preparando capa…');
                         if(item.cover && !item.coverUrl){
                             const key='capas/'+item.ref.id+'/capa';
                             await getStorage().putObject({Bucket:'aem',Key:key,Body:item.cover,ContentType:item.cover.type}).promise();
                             item.coverUrl='https://pub-a62c7f1bfc0248cab53121a7a3f99245.r2.dev/'+key;
                         }
                         if(!item.youtubeId){
-                            const uploaded=await uploadVideoToYoutube(item.file,{title:item.title,isShort:short,privacyStatus,onProgress:p=>{item.status.textContent='YouTube · '+p+'%';}});
+                            stage('Enviando ao YouTube…');
+                            const uploaded=await uploadVideoToYoutube(item.file,{title:item.title,isShort:short,privacyStatus,onProgress:p=>{item.progress=Math.min(99,p);stage('Envio ao YouTube · '+p+'%');refreshBatch();}});
                             item.youtubeId=uploaded.id;
                         }
-                        item.status.textContent='Salvando no catálogo…';
+                        item.progress=99;stage('Salvando no catálogo…');refreshBatch();
                         const now=Date.now(), id=item.youtubeId;
                         await setDoc(item.ref,{titulo:item.title,trilho,subtitulo,selo,orientacao:0,isShort:short,
                             galleryFormat:(item.file ? media.videoHeight>=media.videoWidth : short)?'Vertical':'Horizontal',
@@ -1534,12 +1582,15 @@ const isIos = () => /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCa
                         item.status.textContent='Cadastrado · '+(short?'Conteúdos':'Início');
                         item.row.querySelector('input').disabled=true;
                         item.row.querySelector('button').disabled=true;
-                    }catch(error){item.status.textContent=error.message || 'Falha ao publicar este item.';}
+                    }catch(error){item.failed=true;item.status.textContent='Erro: '+(error.message || 'Falha ao publicar este item.');}
+                    refreshBatch();
                 }
                 const count=batchItems.filter(item=>item.done).length;
                 message.textContent=count+' de '+batchItems.length+' cadastrados.'+(count<batchItems.length?' Confira os itens pendentes e tente novamente nesta página.':'');
-            }catch(error){message.textContent=error.message;}
-            finally{publishingBatch=false;batchElement('fields').disabled=false;}
+            }catch(error){
+                for(const item of pending.filter(item=>!item.done)){item.failed=true;item.status.textContent='Publicação interrompida: '+error.message;}
+                message.textContent=error.message;
+            }finally{publishingBatch=false;batchElement('fields').disabled=false;refreshBatch();}
         };
         window.previewVideo = function(e) {
             const f = e.target.files[0];
