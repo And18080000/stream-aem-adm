@@ -270,9 +270,9 @@ header .nav-link.active{color:#f1d08c;border-bottom:2px solid #d6b778}
             <details id="youtube-settings" class="workpanel border border-red-500/30 rounded-2xl p-4 md:p-6 mb-6 md:mb-8 shadow-lg">
                 <summary class="text-red-400 text-lg font-bold mb-2 flex items-center gap-2"><i class="ph ph-youtube-logo"></i> Conexão direta com o YouTube</summary>
                 <p class="text-xs text-brand-text mb-4">Use o mesmo Client ID OAuth do projeto Google liberado para seu canal. Esta configuração pertence somente ao streaming e não conecta este site à plataforma de cursos. O envio acontece do navegador para o YouTube, como não listado.</p>
-                <div class="flex flex-col sm:flex-row gap-3"><input id="youtube-client-id" type="text" autocomplete="off" placeholder="Client ID OAuth terminado em .apps.googleusercontent.com" class="w-full p-3 rounded-xl bg-black/30 text-white text-sm border border-white/10"><button type="button" onclick="salvarIntegracaoYoutube()" class="shrink-0 bg-red-600 hover:bg-red-500 text-white px-6 py-3 rounded-xl font-bold text-sm">Salvar conexão</button></div>
+                <div class="flex flex-col sm:flex-row gap-3"><input id="youtube-client-id" value="890582797345-q4pte94t9fb6n4rlo04pb68pkjr4270m.apps.googleusercontent.com" type="text" autocomplete="off" placeholder="Client ID OAuth terminado em .apps.googleusercontent.com" class="w-full p-3 rounded-xl bg-black/30 text-white text-sm border border-white/10"><button type="button" onclick="salvarIntegracaoYoutube()" class="shrink-0 bg-red-600 hover:bg-red-500 text-white px-6 py-3 rounded-xl font-bold text-sm">Salvar conexão</button></div>
                 <button class="workbutton" id="authorize-youtube" type="button">Conectar conta do YouTube</button><p id="youtube-session-status" role="status"></p><details class="mt-4"><summary>Gerenciar vídeo enviado</summary><label class="block mt-3">Link do vídeo ou Short<input id="managedLink" class="w-full bg-black p-2" type="url"></label><label class="block text-sm">Visibilidade no YouTube<select id="managed-privacy" class="block w-full rounded bg-black p-2"><option value="unlisted">Não listado (apenas com link)</option><option value="public">Público</option><option value="private">Privado</option></select></label><button id="changePrivacy" class="p-2 underline">Atualizar visibilidade</button><button id="checkVideo" class="p-2 underline">Consultar processamento</button></details>
-<label class="block text-sm mt-4">Conta preferida para o YouTube<input id="youtubeHint" type="email" class="block w-full bg-black p-2 rounded"></label><button id="rememberYoutube" type="button" class="underline text-sm">Salvar conta neste navegador</button>
+<label class="block text-sm mt-4">Conta preferida para o YouTube<input id="youtubeHint" value="aem.producoes.visuais@gmail.com" type="email" class="block w-full bg-black p-2 rounded"></label><button id="rememberYoutube" type="button" class="underline text-sm">Salvar conta neste navegador</button>
 <button type="button" id="deleteManaged" class="block text-red-400 underline mt-3">Excluir do YouTube o vídeo do link informado</button>
 <p id="ytResult" class="text-sm mt-2" aria-live="polite"></p><p id="youtube-connection-status" class="text-[11px] text-brand-text mt-3">Carregando configuração...</p><p class="text-[10px] text-brand-text mt-2">A origem HTTPS deste painel também precisa estar autorizada no Google Cloud. Não cole Client Secret. Projetos Google ainda não auditados podem restringir envios à privacidade.</p>
             </details></section>
@@ -813,7 +813,7 @@ header .nav-link.active{color:#f1d08c;border-bottom:2px solid #d6b778}
         let currentAppLogoUrl = "";
         let selectedMetaCoverFile = null;
         let selectedMetaVideoFile = null;
-        const defaultYoutubeClientId = '890582797345-q4pte94t9fb6n4rlo04pb68pkjr4270m.apps.googleusercontent.com';
+        const defaultYoutubeClientId = document.getElementById('youtube-client-id').defaultValue;
         let youtubeClientId = defaultYoutubeClientId;
         let selectedVideoYoutubeUrl = '';
         let selectedMetaVideoYoutubeUrl = '';
@@ -911,7 +911,7 @@ header .nav-link.active{color:#f1d08c;border-bottom:2px solid #d6b778}
 
         const youtubeSessions=new Map();
         const hintInput=document.getElementById('youtubeHint');
-        let preferredAccount='aem.producoes.visuais@gmail.com';
+        let preferredAccount=hintInput.defaultValue;
         try { preferredAccount=localStorage.getItem('aem.youtube.account') ?? preferredAccount; } catch {}
         hintInput.value=preferredAccount;
         document.getElementById('rememberYoutube').onclick=()=>{
