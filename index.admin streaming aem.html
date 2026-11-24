@@ -225,7 +225,15 @@ header .nav-link.active{color:#f1d08c;border-bottom:2px solid #d6b778}
 <p id="playlistStatus" aria-live="polite"></p><div id="coverGallery" class="space-y-6"></div>
 <dialog id="galleryPlayer" class="bg-black text-white rounded-lg w-full max-w-3xl m-auto"><button class="p-3" onclick="this.closest('dialog').close()">Fechar prévia</button><div class="aspect-video relative"><video controls playsinline class="w-full h-full"></video></div></dialog>
 </section>
-        <section id="view-settings" class="hidden max-w-[1200px] mx-auto px-4"><h1 class="text-2xl font-bold mb-4">Configurações</h1><!-- Identidade Visual do App -->
+        <section id="view-settings" class="hidden max-w-[1200px] mx-auto px-4"><h1 class="text-2xl font-bold mb-4">Configurações</h1>
+            <section class="catalog-panel mb-6" aria-labelledby="projects-title">
+                <h2 id="projects-title" class="text-lg font-bold">Quantidade de projetos entregues</h2>
+                <div role="status" aria-live="polite" aria-atomic="true">
+                    <strong id="projects-count" class="block text-4xl text-brand-gold my-2">—</strong>
+                    <p id="projects-status" class="text-sm text-brand-text">Consultando o catálogo…</p>
+                </div>
+            </section>
+            <!-- Identidade Visual do App -->
             <div class="bg-brand-panel border border-brand-gold/30 rounded-2xl p-4 md:p-6 mb-6 md:mb-8 shadow-lg flex flex-col lg:flex-row gap-6">
                 <div class="flex-grow">
                     <h2 class="text-brand-gold text-lg font-bold mb-4 flex items-center gap-2">
@@ -1897,7 +1905,20 @@ header .nav-link.active{color:#f1d08c;border-bottom:2px solid #d6b778}
         }
 
         window.carregarCatalogoRealtime = function() {
-            onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'catalog'), (snap) => {
+            const total = document.getElementById('projects-count');
+            const status = document.getElementById('projects-status');
+            onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'catalog'), {includeMetadataChanges:true}, (snap) => {
+                if (snap.metadata.fromCache || snap.metadata.hasPendingWrites) {
+                    total.textContent = '—';
+                    status.textContent = 'Aguardando confirmação do catálogo…';
+                } else {
+                    const count = snap.docs.filter(entry => {
+                        const url = entry.get('videoUrl');
+                        return typeof url === 'string' && url.trim() !== '';
+                    }).length;
+                    total.textContent = count.toLocaleString('pt-BR');
+                    status.textContent = 'Cada cadastro com vídeo principal conta como um projeto.';
+                }
                 cacheCatalogo = snap.docs.map(doc => ({ id: doc.id, ...doc.data() })).sort((a, b) => a.createdAt - b.createdAt);
                 
                 renderGallery();
@@ -1949,6 +1970,8 @@ header .nav-link.active{color:#f1d08c;border-bottom:2px solid #d6b778}
                 
                 renderListaOrdem(Array.from(categoriasExistem));
             }, error => {
+                total.textContent = '—';
+                status.textContent = 'Não foi possível consultar a quantidade de projetos.';
                 document.getElementById('admin-lista-conteudo').textContent = 'Falha ao carregar o catálogo: ' + error.message;
                 document.getElementById('admin-service-status').textContent = 'Falha ao consultar o catálogo no Firebase.';
             });
@@ -2650,26 +2673,3 @@ header .nav-link.active{color:#f1d08c;border-bottom:2px solid #d6b778}
         window.addEventListener('admin-view', e => {
             if (e.detail === 'leads') renderLeadDirectory();
             if (e.detail === 'cloud' && currentUser) carregarArquivosR2();
-        });
-        initAuth();
-        onAuthStateChanged(auth, (user) => {
-            currentUser = user;
-            if (user) {
-                document.getElementById('admin-service-status').textContent='';
-                carregarBrandingRealtime();
-                carregarOrdemELogosCategorias();
-                carregarCatalogoRealtime();
-                carregarUsuariosRealtime();
-                carregarConfigAnunciosRealtime();
-                carregarIntegracaoYoutube();
-                onSnapshot(configDoc('salas'),snap=>{rooms=Object.assign(Object.create(null),snap.data());renderGallery();});
-                onSnapshot(maintenanceRef,snap => {
-                    maintenanceEnabled = snap.data()?.active === true;
-                    paintSwitch(); maintenanceSwitch.disabled = false;
-                }, () => maintenanceSwitch.textContent = 'Falha ao consultar disponibilidade');
-            }
-        });
-
-</script>
-<dialog id="deleteYoutubeDialog" class="m-auto rounded-xl bg-brand-panel text-white p-5 max-w-md"><form method="dialog"><h2 class="font-bold">Excluir permanentemente do YouTube?</h2><p id="deleteYoutubeInfo" class="my-3"></p><output id="deleteYoutubeStatus" aria-live="polite"></output><div class="flex gap-4 mt-4"><button value="cancel">Fechar</button><button type="button" id="deleteYoutubeConfirm" class="bg-red-700 rounded px-3 py-2">Autorizar exclusão</button></div></form></dialog></body>
-</html>
