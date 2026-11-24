@@ -28,7 +28,7 @@
     <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
 
     <!-- AWS SDK para Browser -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/aws-sdk/2.1408.0/aws-sdk.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/aws-sdk/2.1408.0/aws-sdk.min.js" onerror="this.onerror=null;this.src='https://sdk.amazonaws.com/js/aws-sdk-2.1408.0.min.js'"></script>
 
     <!-- Configuração do Tailwind -->
     <script>
@@ -222,6 +222,7 @@ header .nav-link.active{color:#f1d08c;border-bottom:2px solid #d6b778}
 <button class="workbutton">Salvar sala</button><output id="roomStatus"></output></form></details>
 <details class="workpanel"><summary>Limpeza nuclear do catálogo</summary><p>Remove os conteúdos, anúncios, categorias e suas mídias vinculadas no R2. Os vídeos no canal do YouTube são preservados.</p>
 <form id="resetForm"><label>Senha do sistema <input type="password" autocomplete="off" id="resetPassword" required></label> <button class="workbutton danger">Revisar exclusão</button></form><output id="resetStatus" aria-live="polite"></output></details>
+<div class="flex items-center gap-3 my-4"><span id="gallery-status" role="status">Carregando catálogo…</span><button type="button" id="gallery-retry" class="underline" hidden>Tentar novamente</button></div>
 <p id="playlistStatus" aria-live="polite"></p><div id="coverGallery" class="space-y-6"></div>
 <dialog id="galleryPlayer" class="bg-black text-white rounded-lg w-full max-w-3xl m-auto"><button class="p-3" onclick="this.closest('dialog').close()">Fechar prévia</button><div class="aspect-video relative"><video controls playsinline class="w-full h-full"></video></div></dialog>
 </section>
@@ -765,6 +766,206 @@ header .nav-link.active{color:#f1d08c;border-bottom:2px solid #d6b778}
         };
 
     </script>
+    <script>
+       // AWS R2
+        let storageClient;
+        function getStorage(){
+            if(!window.AWS?.S3) throw Error('Cloud R2 indisponível. Recarregue o painel para tentar novamente.');
+            return storageClient ??= new window.AWS.S3({
+            endpoint: 'https://679ab4032c53de6dee298b613e90e0db.r2.cloudflarestorage.com',
+            accessKeyId: '69e552e54ff90a1e889b60d52b7554b6',
+            secretAccessKey: 'c3628552b794067bd258cb7c2777b6614ebe28f57ae3d763b7d55cc02fda99b1',
+            signatureVersion: 'v4',
+            region: 'auto',
+            s3ForcePathStyle: true,
+            httpOptions: { timeout: 0 } // PREVINE QUEDA DE CONEXÃO EM VÍDEOS GIGANTES
+        });
+
+        }
+
+        window.showToast = (msg, isError = false) => {
+            const t = document.getElementById('toast');
+            document.getElementById('toast-msg').innerText = msg;
+            t.classList.remove('bg-green-600','bg-red-600');
+            t.classList.add(isError ? 'bg-red-600' : 'bg-green-600');
+            t.classList.remove('translate-x-full', 'opacity-0');
+            setTimeout(() => { t.classList.add('translate-x-full', 'opacity-0'); }, 3000);
+        };
+
+        const defaultYoutubeClientId = document.getElementById('youtube-client-id').defaultValue;
+        let youtubeClientId = defaultYoutubeClientId;
+        const youtubeSessions=new Map();
+        const hintInput=document.getElementById('youtubeHint');
+        let preferredAccount=hintInput.defaultValue;
+        try { preferredAccount=localStorage.getItem('aem.youtube.account') ?? preferredAccount; } catch {}
+        hintInput.value=preferredAccount;
+        document.getElementById('rememberYoutube').onclick=()=>{
+            if(!hintInput.reportValidity())return;
+            preferredAccount=hintInput.value.trim();localStorage.setItem('aem.youtube.account',preferredAccount);
+            youtubeSessions.clear();showToast('Preferência salva neste navegador.');
+        };
+        async function ensureYoutubeIdentity(scope = 'https://www.googleapis.com/auth/youtube.upload') {
+            if (!youtubeClientId) throw new Error('Configure o Client ID OAuth do YouTube nos ajustes do painel.');
+            const key=youtubeClientId+'|'+preferredAccount+'|'+scope;
+            const cached=youtubeSessions.get(key);
+            if(cached && Date.now()<cached.until)return cached.token;
+            const oauth = window.google?.accounts?.oauth2;
+            if (!oauth) throw Error('A autorização Google ainda não carregou. Aguarde e clique novamente. Se persistir, confira se o navegador permite accounts.google.com.');
+            return new Promise((resolve,reject) => {
+                const client = oauth.initTokenClient({
+                    client_id: youtubeClientId, scope, ...(preferredAccount ? {login_hint:preferredAccount}:{}),
+                    callback: response => {
+                        if (response.error || !response.access_token) return reject(Error(response.error_description || response.error || 'Falha ao autorizar a conta.'));
+                        if (!oauth.hasGrantedAllScopes(response,scope)) return reject(Error('A permissão solicitada não foi concedida. Tente novamente e marque a permissão do YouTube.'));
+                        youtubeSessions.set(key,{token:response.access_token,until:Date.now()+Math.max(0,Number(response.expires_in)-90)*1000});
+                        resolve(response.access_token);
+                    },
+                    error_callback: error => reject(Error(error.type === 'popup_failed_to_open'
+                        ? 'O navegador bloqueou a janela. Permita pop-ups para este painel e clique novamente.'
+                        : error.type === 'popup_closed' ? 'A janela foi fechada antes de concluir a autorização.' : 'Falha ao abrir a autorização Google.'))
+                });
+                client.requestAccessToken({prompt:preferredAccount?'':'select_account'});
+            });
+        }
+
+        document.getElementById('authorize-youtube').onclick = async function() {
+            const status = document.getElementById('youtube-session-status');
+            this.disabled = true;
+            try { await ensureYoutubeIdentity(); status.textContent = 'Envio autorizado nesta sessão.'; }
+            catch (error) { status.textContent = error.message; }
+            finally { this.disabled = false; }
+        };
+
+        async function listR2(){
+            const files = [];
+            let next;
+            do {
+                const page = await getStorage().listObjectsV2({Bucket:'aem',ContinuationToken:next}).promise();
+                files.push(...(page.Contents || []));
+                next = page.NextContinuationToken;
+            } while(next);
+            return files;
+        }
+        function escapeFileText(text) {
+            return String(text).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[c]);
+        }
+        let refreshingR2=false;
+        setInterval(()=>{if(!document.hidden && !document.getElementById('view-cloud').classList.contains('hidden')) carregarArquivosR2();},60000);
+        window.carregarArquivosR2 = async function() {
+            if(refreshingR2) return;
+            refreshingR2=true;
+            const grid = document.getElementById('cloud-files-grid');
+            const usageText = document.getElementById('cloud-usage-gb');
+            const usagePct = document.getElementById('cloud-usage-pct');
+            const usageBar = document.getElementById('cloud-usage-bar');
+
+            showToast("A sincronizar com Banco Gold R2...");
+
+            try {
+                const params = { Bucket: "aem" };
+                const files = await listR2();
+                document.getElementById("r2Measured").textContent="0 bytes · 0 objetos";
+                
+                let totalBytes = 0;
+                let html = "";
+
+                if (files.length === 0) {
+                    usageText.innerText = "0"; usagePct.innerText = "0%"; usageBar.style.width = "0%";
+                    grid.innerHTML = `<div class="col-span-full py-20 text-center text-brand-text italic">Nenhum ficheiro encontrado no bucket.</div>`;
+                    return;
+                }
+
+                files.sort((a, b) => b.LastModified - a.LastModified);
+
+                files.forEach(file => {
+                    totalBytes += file.Size;
+                    const ext = file.Key.split('.').pop().toLowerCase();
+                    const isImg = ['jpg', 'jpeg', 'png', 'webp', 'gif'].includes(ext);
+                    const isVid = ['mp4', 'mov', 'webm', 'm4v'].includes(ext);
+                    const fileUrl = `https://pub-a62c7f1bfc0248cab53121a7a3f99245.r2.dev/${file.Key.split("/").map(encodeURIComponent).join("/")}`;
+                    const fileSizeMB = (file.Size / (1024 * 1024)).toFixed(2);
+
+                    let previewHTML = `<div class="w-full h-full flex items-center justify-center bg-black/20 text-brand-text"><i class="ph ph-file-text text-3xl"></i></div>`;
+                    
+                    if (isImg) {
+                        previewHTML = `<img src="${fileUrl}" class="w-full h-full object-cover" loading="lazy">`;
+                    } else if (isVid) {
+                        previewHTML = `<video preload="none" src="${fileUrl}" class="w-full h-full object-cover" muted></video>
+                                       <div class="absolute inset-0 flex items-center justify-center bg-black/40"><i class="ph-fill ph-play text-white/50 text-2xl"></i></div>`;
+                    }
+
+                    html += `
+                    <div class="group bg-[#2A2C33] rounded-xl overflow-hidden border border-white/5 hover:border-brand-gold transition-all flex flex-col shadow-lg relative h-fit">
+                        <div class="aspect-square relative overflow-hidden bg-black/40">
+                            ${previewHTML}
+                            <div class="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-3">
+                                <a href="${fileUrl}" target="_blank" class="w-10 h-10 bg-white/10 rounded-full flex items-center justify-center text-white hover:bg-brand-blue transition" title="Abrir"><i class="ph ph-eye text-xl"></i></a>
+                                <button onclick="excluirArquivoR2('${encodeURIComponent(file.Key).replace(/'/g, '%27')}')" class="w-10 h-10 bg-red-600/20 rounded-full flex items-center justify-center text-red-500 hover:bg-red-600 hover:text-white transition" title="Excluir do bucket Cloudflare R2"><i class="ph ph-trash text-xl"></i></button>
+                            </div>
+                        </div>
+                        <div class="p-3 flex flex-col gap-1">
+                            <p class="text-[10px] text-white font-bold truncate uppercase tracking-tighter" title="${escapeFileText(file.Key)}">${escapeFileText(file.Key.split('/').pop())}</p>
+                            <div class="flex justify-between items-center mt-1">
+                                <span class="text-[8px] text-brand-text font-black uppercase">${escapeFileText(ext)}</span>
+                                <span class="text-[9px] text-brand-gold font-mono font-bold">${fileSizeMB} MB</span>
+                            </div>
+                        </div>
+                    </div>`;
+                });
+
+                grid.innerHTML = html;
+
+                // Cálculos de Gigabytes
+                const totalGB = (totalBytes / 1e9).toFixed(3);
+                document.getElementById('r2Measured').textContent=totalBytes.toLocaleString('pt-BR')+' bytes · '+files.length+' objetos · '+new Date().toLocaleTimeString('pt-BR');
+                usageText.innerText = totalGB;
+                
+                showToast(`Base Gold R2 Atualizada! Consumo: ${totalGB} GB`);
+
+                // Porcentagem baseada em 10GB (Free Tier comum do R2)
+                const pct = Math.min(100, (parseFloat(totalGB) / 10) * 100).toFixed(1);
+                usagePct.innerText = pct + '%';
+                usageBar.style.width = pct + '%';
+
+            } catch (err) {
+                console.error(err);
+                document.getElementById("r2Measured").textContent="Falha ao consultar R2: "+(err.code ? err.code+" · " : "")+err.message;
+                showToast("Erro ao listar ficheiros do Cloud R2.", true);
+            } finally {refreshingR2=false;}
+        };
+
+        window.excluirArquivoR2Silencioso = async function(url) {
+            try {
+                const parsed = new URL(String(url || ''));
+                if (parsed.hostname !== 'pub-a62c7f1bfc0248cab53121a7a3f99245.r2.dev') return false;
+                const key = decodeURIComponent(parsed.pathname.replace(/^\//, ''));
+                if (!key) return false;
+                await getStorage().deleteObject({ Bucket: 'aem', Key: key }).promise();
+                return true;
+            } catch (error) { console.error('Falha ao excluir objeto R2:', error); throw error; }
+        };
+
+        window.excluirArquivoR2 = async function(encodedKey) {
+            let key = '';
+            try { key = decodeURIComponent(encodedKey); } catch { key = String(encodedKey || ''); }
+            if (!key) return showToast('Arquivo inválido.', true);
+            if(!confirm(`Tem a certeza que deseja EXCLUIR DEFINITIVAMENTE o ficheiro "${key}" do servidor R2? Esta ação não pode ser desfeita.`)) return;
+            
+            try {
+                const params = { Bucket: "aem", Key: key };
+                await getStorage().deleteObject(params).promise();
+                showToast("Arquivo excluído do bucket Cloudflare R2.");
+                await carregarArquivosR2();
+            } catch(e) {
+                console.error('Erro ao excluir objeto R2:', e);
+                showToast(e?.message || "Erro ao excluir do R2. Confira as permissões de exclusão do bucket.", true);
+            }
+        };
+
+        window.addEventListener('admin-view', e => {
+            if (e.detail === 'cloud') carregarArquivosR2();
+        });
+    </script>
     <!-- SCRIPTS -->
     <script type="module" onerror="document.getElementById('admin-service-status').textContent='Falha ao carregar os serviços do painel. Verifique a conexão e recarregue a página.'">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
@@ -785,22 +986,6 @@ header .nav-link.active{color:#f1d08c;border-bottom:2px solid #d6b778}
         const db = getFirestore(app);
         const appId = firebaseConfig.appId;
 
-       // AWS R2
-        let storageClient;
-        function getStorage(){
-            if(!window.AWS?.S3) throw Error('Cloud R2 indisponível. Recarregue o painel para tentar novamente.');
-            return storageClient ??= new window.AWS.S3({
-            endpoint: 'https://679ab4032c53de6dee298b613e90e0db.r2.cloudflarestorage.com',
-            accessKeyId: '69e552e54ff90a1e889b60d52b7554b6',
-            secretAccessKey: 'c3628552b794067bd258cb7c2777b6614ebe28f57ae3d763b7d55cc02fda99b1',
-            signatureVersion: 'v4',
-            region: 'auto',
-            s3ForcePathStyle: true,
-            httpOptions: { timeout: 0 } // PREVINE QUEDA DE CONEXÃO EM VÍDEOS GIGANTES
-        });
-
-        }
-
         // VARIÁVEIS GLOBAIS
         let currentUser = null;
         let cacheCatalogo = []; 
@@ -813,8 +998,6 @@ header .nav-link.active{color:#f1d08c;border-bottom:2px solid #d6b778}
         let currentAppLogoUrl = "";
         let selectedMetaCoverFile = null;
         let selectedMetaVideoFile = null;
-        const defaultYoutubeClientId = document.getElementById('youtube-client-id').defaultValue;
-        let youtubeClientId = defaultYoutubeClientId;
         let selectedVideoYoutubeUrl = '';
         let selectedMetaVideoYoutubeUrl = '';
         let selectedAdFile = null;
@@ -826,16 +1009,7 @@ header .nav-link.active{color:#f1d08c;border-bottom:2px solid #d6b778}
         window.catLogosFiles = {};
 
         // AUTH
-        const initAuth = async () => { try { await signInAnonymously(auth); } catch (e) { document.getElementById('admin-service-status').textContent='Falha ao conectar ao Firebase. Recarregue a página para tentar novamente.'; } };
-        window.showToast = (msg, isError = false) => {
-            const t = document.getElementById('toast');
-            document.getElementById('toast-msg').innerText = msg;
-            t.classList.remove('bg-green-600','bg-red-600');
-            t.classList.add(isError ? 'bg-red-600' : 'bg-green-600');
-            t.classList.remove('translate-x-full', 'opacity-0');
-            setTimeout(() => { t.classList.add('translate-x-full', 'opacity-0'); }, 3000);
-        };
-
+        const initAuth = async () => { try { await signInAnonymously(auth); } catch (e) { galleryRetry.hidden=false; galleryStatus.textContent='Falha na autenticação: '+(e.code || e.message); document.getElementById('admin-service-status').textContent=galleryStatus.textContent; } };
         // Integração independente do streaming com o YouTube. Só o Client ID público
         // fica no Firestore; o token de upload é concedido no navegador a cada envio.
         const maintenanceRef = doc(db,'artifacts',appId,'public','data','configuracoes','maintenance');
@@ -907,48 +1081,6 @@ header .nav-link.active{color:#f1d08c;border-bottom:2px solid #d6b778}
                 console.error(error);
                 window.showToast('Não foi possível salvar a integração do YouTube.', true);
             }
-        };
-
-        const youtubeSessions=new Map();
-        const hintInput=document.getElementById('youtubeHint');
-        let preferredAccount=hintInput.defaultValue;
-        try { preferredAccount=localStorage.getItem('aem.youtube.account') ?? preferredAccount; } catch {}
-        hintInput.value=preferredAccount;
-        document.getElementById('rememberYoutube').onclick=()=>{
-            if(!hintInput.reportValidity())return;
-            preferredAccount=hintInput.value.trim();localStorage.setItem('aem.youtube.account',preferredAccount);
-            youtubeSessions.clear();showToast('Preferência salva neste navegador.');
-        };
-        async function ensureYoutubeIdentity(scope = 'https://www.googleapis.com/auth/youtube.upload') {
-            if (!youtubeClientId) throw new Error('Configure o Client ID OAuth do YouTube nos ajustes do painel.');
-            const key=youtubeClientId+'|'+preferredAccount+'|'+scope;
-            const cached=youtubeSessions.get(key);
-            if(cached && Date.now()<cached.until)return cached.token;
-            const oauth = window.google?.accounts?.oauth2;
-            if (!oauth) throw Error('A autorização Google ainda não carregou. Aguarde e clique novamente. Se persistir, confira se o navegador permite accounts.google.com.');
-            return new Promise((resolve,reject) => {
-                const client = oauth.initTokenClient({
-                    client_id: youtubeClientId, scope, ...(preferredAccount ? {login_hint:preferredAccount}:{}),
-                    callback: response => {
-                        if (response.error || !response.access_token) return reject(Error(response.error_description || response.error || 'Falha ao autorizar a conta.'));
-                        if (!oauth.hasGrantedAllScopes(response,scope)) return reject(Error('A permissão solicitada não foi concedida. Tente novamente e marque a permissão do YouTube.'));
-                        youtubeSessions.set(key,{token:response.access_token,until:Date.now()+Math.max(0,Number(response.expires_in)-90)*1000});
-                        resolve(response.access_token);
-                    },
-                    error_callback: error => reject(Error(error.type === 'popup_failed_to_open'
-                        ? 'O navegador bloqueou a janela. Permita pop-ups para este painel e clique novamente.'
-                        : error.type === 'popup_closed' ? 'A janela foi fechada antes de concluir a autorização.' : 'Falha ao abrir a autorização Google.'))
-                });
-                client.requestAccessToken({prompt:preferredAccount?'':'select_account'});
-            });
-        }
-
-        document.getElementById('authorize-youtube').onclick = async function() {
-            const status = document.getElementById('youtube-session-status');
-            this.disabled = true;
-            try { await ensureYoutubeIdentity(); status.textContent = 'Envio autorizado nesta sessão.'; }
-            catch (error) { status.textContent = error.message; }
-            finally { this.disabled = false; }
         };
 
         function uploadError(status,body){
@@ -1153,7 +1285,7 @@ header .nav-link.active{color:#f1d08c;border-bottom:2px solid #d6b778}
                     if(snapLogos.exists()) { window.cacheLogosCategorias = snapLogos.data(); }
                     getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'configuracoes', 'ocultarTextoCategorias')).then(snapOcultar => {
                         if(snapOcultar.exists()) { window.cacheOcultarCategorias = snapOcultar.data(); }
-                        renderListaOrdem(Array.from(new Set(cacheCatalogo.map(i => i.trilho || "Outros"))));
+                        renderListaOrdem(Array.from(new Set(cacheCatalogo.flatMap(itemCategories))));
                     });
                 });
             });
@@ -1731,12 +1863,13 @@ header .nav-link.active{color:#f1d08c;border-bottom:2px solid #d6b778}
         let rooms = Object.create(null);
         const galleryFormat = document.getElementById('galleryFormat');
         function itemCategories(item){
-            const names=[item.trilho || 'Outros'];
-            return [...new Set(names)];
+            const raw = Array.isArray(item.trilho) ? item.trilho : [item.trilho];
+            const names = raw.filter(n => typeof n === 'string').map(n => n.trim()).filter(Boolean);
+            return names.length ? [...new Set(names)] : ['Outros'];
         }
         function formatOf(item){
             if(['Horizontal','Vertical'].includes(item.galleryFormat)) return item.galleryFormat;
-            if(item.isShort || item.menuIds?.includes('menu2') || /^conte[uú]dos$/i.test(item.trilho || '')) return 'Vertical';
+            if(item.isShort || (Array.isArray(item.menuIds) && item.menuIds.includes('menu2') || item.menuIds==='menu2') || /^conte[uú]dos$/i.test(item.trilho || '')) return 'Vertical';
             return 'Horizontal';
         }
         galleryFormat.onchange = renderGallery;
@@ -1810,7 +1943,7 @@ header .nav-link.active{color:#f1d08c;border-bottom:2px solid #d6b778}
             sorted.forEach(c=>categoryFilter.add(new Option(c,c)));
             categoryFilter.value = groups.has(selected) ? selected : '';
             gallery.replaceChildren();
-            if(!sorted.length) gallery.textContent = 'Nenhum conteúdo cadastrado.';
+
             for(const name of sorted){
                 const visible = groups.get(name).filter(i=>!galleryFormat.value || galleryFormat.value===formatOf(i));
                 if(!visible.length && galleryFormat.value) continue;
@@ -1904,10 +2037,29 @@ header .nav-link.active{color:#f1d08c;border-bottom:2px solid #d6b778}
             if(galleryYoutubeId(item?.videoUrl))offerRemoval(item.videoUrl,item.titulo);
         }
 
+        const galleryStatus = document.getElementById('gallery-status');
+        const galleryRetry = document.getElementById('gallery-retry');
+        let stopCatalog = null;
+        galleryRetry.onclick = () => {
+            if (auth.currentUser) carregarCatalogoRealtime();
+            else initAuth();
+        };
         window.carregarCatalogoRealtime = function() {
+            if (stopCatalog) stopCatalog();
+            galleryStatus.textContent = 'Carregando catálogo…';
+            galleryRetry.hidden = true;
             const total = document.getElementById('projects-count');
             const status = document.getElementById('projects-status');
-            onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'catalog'), {includeMetadataChanges:true}, (snap) => {
+            stopCatalog = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'catalog'), {includeMetadataChanges:true}, (snap) => {
+                if (snap.metadata.fromCache && snap.empty) {
+                    galleryStatus.textContent = 'Aguardando conexão com o catálogo…';
+                    return;
+                }
+                cacheCatalogo = snap.docs.map(entry => ({...entry.data(), id:entry.id})).sort((a,b)=>a.createdAt-b.createdAt);
+                renderGallery();
+                galleryStatus.textContent = snap.metadata.fromCache
+                    ? 'Exibindo a última leitura disponível. Aguardando o servidor…'
+                    : cacheCatalogo.length ? 'Publicações no catálogo: ' + cacheCatalogo.length : 'Nenhuma publicação no catálogo.';
                 if (snap.metadata.fromCache || snap.metadata.hasPendingWrites) {
                     total.textContent = '—';
                     status.textContent = 'Aguardando confirmação do catálogo…';
@@ -1919,18 +2071,16 @@ header .nav-link.active{color:#f1d08c;border-bottom:2px solid #d6b778}
                     total.textContent = count.toLocaleString('pt-BR');
                     status.textContent = 'Cada cadastro com vídeo principal conta como um projeto.';
                 }
-                cacheCatalogo = snap.docs.map(doc => ({ id: doc.id, ...doc.data() })).sort((a, b) => a.createdAt - b.createdAt);
-                
-                renderGallery();
+
                 let adm = "";
                 const categoriasExistem = new Set();
-                const catalogoPorCategoria = {};
+                const catalogoPorCategoria = Object.create(null);
                 
                 // Labels amigáveis para os menus
-                const menuName = item => item.isShort || item.menuId==='menu2' || item.menuIds?.includes('menu2') || ['conteúdos','conteudos'].includes(item.trilho?.toLowerCase()) ? 'CONTEÚDOS' : 'INÍCIO';
+                const menuName = item => item.isShort || item.menuId==='menu2' || (Array.isArray(item.menuIds) && item.menuIds.includes('menu2') || item.menuIds==='menu2') || itemCategories(item).some(name => /^conte[uú]dos$/i.test(name)) ? 'CONTEÚDOS' : 'INÍCIO';
 
                 cacheCatalogo.forEach((item, index) => {
-                    const cat = item.trilho || "Outros";
+                    const cat = itemCategories(item)[0];
                     categoriasExistem.add(cat);
                     
                     if (!catalogoPorCategoria[cat]) catalogoPorCategoria[cat] = [];
@@ -1953,7 +2103,7 @@ header .nav-link.active{color:#f1d08c;border-bottom:2px solid #d6b778}
                 
                 const sortedCats = Array.from(categoriasExistem).sort();
                 sortedCats.forEach(cat => {
-                    selectOptions += `<optgroup label="TRILHO: ${cat.toUpperCase()}">`;
+                    selectOptions += `<optgroup label="TRILHO: ${catalogText(cat.toUpperCase())}">`;
                     catalogoPorCategoria[cat].forEach(item => {
                         const tags = '['+menuName(item)+']';
                         selectOptions += `<option value="${item.id}">${catalogText(item.titulo)} ${tags}</option>`;
@@ -1962,7 +2112,7 @@ header .nav-link.active{color:#f1d08c;border-bottom:2px solid #d6b778}
                 });
 
                 document.getElementById('admin-lista-conteudo').innerHTML = adm || "<p class='text-sm text-brand-text mt-2'>Nenhum conteúdo.</p>";
-                document.getElementById('existing-categories').innerHTML = Array.from(categoriasExistem).map(c => `<option value="${c}">`).join('');
+                document.getElementById('existing-categories').innerHTML = Array.from(categoriasExistem).map(c => `<option value="${catalogText(c)}">`).join('');
                 const selector=document.getElementById('meta-select-video'), previous=selector.value;
                 selector.innerHTML=selectOptions;
                 if(previous)selector.value=previous;
@@ -1971,6 +2121,8 @@ header .nav-link.active{color:#f1d08c;border-bottom:2px solid #d6b778}
                 renderListaOrdem(Array.from(categoriasExistem));
             }, error => {
                 total.textContent = '—';
+                galleryStatus.textContent = 'Falha ao consultar as publicações: ' + error.message;
+                galleryRetry.hidden = false;
                 status.textContent = 'Não foi possível consultar a quantidade de projetos.';
                 document.getElementById('admin-lista-conteudo').textContent = 'Falha ao carregar o catálogo: ' + error.message;
                 document.getElementById('admin-service-status').textContent = 'Falha ao consultar o catálogo no Firebase.';
@@ -2526,16 +2678,6 @@ header .nav-link.active{color:#f1d08c;border-bottom:2px solid #d6b778}
         // ==========================================
         // ABA 3: BANCO DE DADOS CLOUD R2
         // ==========================================
-        async function listR2(){
-            const files = [];
-            let next;
-            do {
-                const page = await getStorage().listObjectsV2({Bucket:'aem',ContinuationToken:next}).promise();
-                files.push(...(page.Contents || []));
-                next = page.NextContinuationToken;
-            } while(next);
-            return files;
-        }
         document.getElementById('cleanVideos').onclick = async function(){
             const report = document.getElementById('cleanReport');
             this.disabled = true;
@@ -2557,119 +2699,29 @@ header .nav-link.active{color:#f1d08c;border-bottom:2px solid #d6b778}
             } catch(e){ report.textContent = removed+' excluídos. Falha: '+e.message; }
             finally { this.disabled=false; }
         };
-        let refreshingR2=false;
-        setInterval(()=>{if(!document.hidden && !document.getElementById('view-cloud').classList.contains('hidden')) carregarArquivosR2();},60000);
-        window.carregarArquivosR2 = async function() {
-            if(refreshingR2) return;
-            refreshingR2=true;
-            const grid = document.getElementById('cloud-files-grid');
-            const usageText = document.getElementById('cloud-usage-gb');
-            const usagePct = document.getElementById('cloud-usage-pct');
-            const usageBar = document.getElementById('cloud-usage-bar');
-
-            showToast("A sincronizar com Banco Gold R2...");
-
-            try {
-                const params = { Bucket: "aem" };
-                const files = await listR2();
-                document.getElementById("r2Measured").textContent="0 bytes · 0 objetos";
-                
-                let totalBytes = 0;
-                let html = "";
-
-                if (files.length === 0) {
-                    usageText.innerText = "0"; usagePct.innerText = "0%"; usageBar.style.width = "0%";
-                    grid.innerHTML = `<div class="col-span-full py-20 text-center text-brand-text italic">Nenhum ficheiro encontrado no bucket.</div>`;
-                    return;
-                }
-
-                files.sort((a, b) => b.LastModified - a.LastModified);
-
-                files.forEach(file => {
-                    totalBytes += file.Size;
-                    const ext = file.Key.split('.').pop().toLowerCase();
-                    const isImg = ['jpg', 'jpeg', 'png', 'webp', 'gif'].includes(ext);
-                    const isVid = ['mp4', 'mov', 'webm', 'm4v'].includes(ext);
-                    const fileUrl = `https://pub-a62c7f1bfc0248cab53121a7a3f99245.r2.dev/${file.Key}`;
-                    const fileSizeMB = (file.Size / (1024 * 1024)).toFixed(2);
-
-                    let previewHTML = `<div class="w-full h-full flex items-center justify-center bg-black/20 text-brand-text"><i class="ph ph-file-text text-3xl"></i></div>`;
-                    
-                    if (isImg) {
-                        previewHTML = `<img src="${fileUrl}" class="w-full h-full object-cover" loading="lazy">`;
-                    } else if (isVid) {
-                        previewHTML = `<video preload="none" src="${fileUrl}" class="w-full h-full object-cover" muted></video>
-                                       <div class="absolute inset-0 flex items-center justify-center bg-black/40"><i class="ph-fill ph-play text-white/50 text-2xl"></i></div>`;
-                    }
-
-                    html += `
-                    <div class="group bg-[#2A2C33] rounded-xl overflow-hidden border border-white/5 hover:border-brand-gold transition-all flex flex-col shadow-lg relative h-fit">
-                        <div class="aspect-square relative overflow-hidden bg-black/40">
-                            ${previewHTML}
-                            <div class="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-3">
-                                <a href="${fileUrl}" target="_blank" class="w-10 h-10 bg-white/10 rounded-full flex items-center justify-center text-white hover:bg-brand-blue transition" title="Abrir"><i class="ph ph-eye text-xl"></i></a>
-                                <button onclick="excluirArquivoR2('${encodeURIComponent(file.Key).replace(/'/g, '%27')}')" class="w-10 h-10 bg-red-600/20 rounded-full flex items-center justify-center text-red-500 hover:bg-red-600 hover:text-white transition" title="Excluir do bucket Cloudflare R2"><i class="ph ph-trash text-xl"></i></button>
-                            </div>
-                        </div>
-                        <div class="p-3 flex flex-col gap-1">
-                            <p class="text-[10px] text-white font-bold truncate uppercase tracking-tighter" title="${file.Key}">${file.Key.split('/').pop()}</p>
-                            <div class="flex justify-between items-center mt-1">
-                                <span class="text-[8px] text-brand-text font-black uppercase">${ext}</span>
-                                <span class="text-[9px] text-brand-gold font-mono font-bold">${fileSizeMB} MB</span>
-                            </div>
-                        </div>
-                    </div>`;
-                });
-
-                grid.innerHTML = html;
-
-                // Cálculos de Gigabytes
-                const totalGB = (totalBytes / 1e9).toFixed(3);
-                document.getElementById('r2Measured').textContent=totalBytes.toLocaleString('pt-BR')+' bytes · '+files.length+' objetos · '+new Date().toLocaleTimeString('pt-BR');
-                usageText.innerText = totalGB;
-                
-                showToast(`Base Gold R2 Atualizada! Consumo: ${totalGB} GB`);
-
-                // Porcentagem baseada em 10GB (Free Tier comum do R2)
-                const pct = Math.min(100, (parseFloat(totalGB) / 10) * 100).toFixed(1);
-                usagePct.innerText = pct + '%';
-                usageBar.style.width = pct + '%';
-
-            } catch (err) {
-                console.error(err);
-                document.getElementById("r2Measured").textContent="Falha na atualização. Última medição pode estar desatualizada.";
-                showToast("Erro ao listar ficheiros do Cloud R2.", true);
-            } finally {refreshingR2=false;}
-        };
-
-        window.excluirArquivoR2Silencioso = async function(url) {
-            try {
-                const parsed = new URL(String(url || ''));
-                if (parsed.hostname !== 'pub-a62c7f1bfc0248cab53121a7a3f99245.r2.dev') return false;
-                const key = decodeURIComponent(parsed.pathname.replace(/^\//, ''));
-                if (!key) return false;
-                await getStorage().deleteObject({ Bucket: 'aem', Key: key }).promise();
-                return true;
-            } catch (error) { console.error('Falha ao excluir objeto R2:', error); throw error; }
-        };
-
-        window.excluirArquivoR2 = async function(encodedKey) {
-            let key = '';
-            try { key = decodeURIComponent(encodedKey); } catch { key = String(encodedKey || ''); }
-            if (!key) return showToast('Arquivo inválido.', true);
-            if(!confirm(`Tem a certeza que deseja EXCLUIR DEFINITIVAMENTE o ficheiro "${key}" do servidor R2? Esta ação não pode ser desfeita.`)) return;
-            
-            try {
-                const params = { Bucket: "aem", Key: key };
-                await getStorage().deleteObject(params).promise();
-                showToast("Arquivo excluído do bucket Cloudflare R2.");
-                await carregarArquivosR2();
-            } catch(e) {
-                console.error('Erro ao excluir objeto R2:', e);
-                showToast(e?.message || "Erro ao excluir do R2. Confira as permissões de exclusão do bucket.", true);
-            }
-        };
-
         window.addEventListener('admin-view', e => {
             if (e.detail === 'leads') renderLeadDirectory();
-            if (e.detail === 'cloud' && currentUser) carregarArquivosR2();
+
+        });
+        onAuthStateChanged(auth, (user) => {
+            currentUser = user;
+            if (!user) { initAuth(); return; }
+            if (user) {
+                document.getElementById('admin-service-status').textContent='';
+                carregarCatalogoRealtime();
+                carregarBrandingRealtime();
+                carregarOrdemELogosCategorias();
+                carregarUsuariosRealtime();
+                carregarConfigAnunciosRealtime();
+                carregarIntegracaoYoutube();
+                onSnapshot(configDoc('salas'),snap=>{rooms=Object.assign(Object.create(null),snap.data());renderGallery();});
+                onSnapshot(maintenanceRef,snap => {
+                    maintenanceEnabled = snap.data()?.active === true;
+                    paintSwitch(); maintenanceSwitch.disabled = false;
+                }, () => maintenanceSwitch.textContent = 'Falha ao consultar disponibilidade');
+            }
+        });
+
+</script>
+<dialog id="deleteYoutubeDialog" class="m-auto rounded-xl bg-brand-panel text-white p-5 max-w-md"><form method="dialog"><h2 class="font-bold">Excluir permanentemente do YouTube?</h2><p id="deleteYoutubeInfo" class="my-3"></p><output id="deleteYoutubeStatus" aria-live="polite"></output><div class="flex gap-4 mt-4"><button value="cancel">Fechar</button><button type="button" id="deleteYoutubeConfirm" class="bg-red-700 rounded px-3 py-2">Autorizar exclusão</button></div></form></dialog></body>
+</html>
