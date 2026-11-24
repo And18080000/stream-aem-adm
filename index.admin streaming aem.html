@@ -2,6 +2,19 @@
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
+    <script>
+        window.addEventListener('contextmenu', event => event.preventDefault(), true);
+        window.addEventListener('keydown', event => {
+            const key = event.key.toLowerCase();
+            const inspectKey = ['i', 'j', 'c'].includes(key);
+            const ctrlInspect = event.ctrlKey && event.shiftKey && inspectKey;
+            const macInspect = event.metaKey && event.altKey && inspectKey;
+            const viewSource = key === 'u' && (event.ctrlKey || (event.metaKey && event.altKey));
+            if (key === 'f12' || ctrlInspect || macInspect || viewSource) {
+                event.preventDefault();
+            }
+        }, true);
+    </script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>A&amp;M Streaming - Admin</title>
     
@@ -172,7 +185,8 @@ header .nav-link.active{color:#f1d08c;border-bottom:2px solid #d6b778}
             </div>
             <nav class="flex gap-4 md:gap-6 text-xs md:text-sm font-medium text-brand-text whitespace-nowrap">
                 <button onclick="navigate('gallery')" id="nav-gallery" class="nav-link pb-1">GALERIA</button>
-                <button onclick="navigate('admin')" id="nav-admin" class="nav-link active pb-1 hover:text-white transition">CATÁLOGO & CONFIG</button>
+                <button onclick="navigate('admin')" id="nav-admin" class="nav-link active pb-1 hover:text-white transition">CATÁLOGO</button>
+                <button onclick="navigate('settings')" id="nav-settings" class="nav-link pb-1">CONFIGURAÇÕES</button>
                 <button onclick="navigate('published')" id="nav-published" class="nav-link pb-1">CONTEÚDOS PUBLICADOS</button>
                 <button onclick="navigate('ads')" id="nav-ads" class="nav-link pb-1 hover:text-white transition">METADADOS & CLIENTES</button>
                 <button onclick="navigate('leads')" id="nav-leads" class="nav-link pb-1">LEADS</button>
@@ -211,12 +225,7 @@ header .nav-link.active{color:#f1d08c;border-bottom:2px solid #d6b778}
 <p id="playlistStatus" aria-live="polite"></p><div id="coverGallery" class="space-y-6"></div>
 <dialog id="galleryPlayer" class="bg-black text-white rounded-lg w-full max-w-3xl m-auto"><button class="p-3" onclick="this.closest('dialog').close()">Fechar prévia</button><div class="aspect-video relative"><video controls playsinline class="w-full h-full"></video></div></dialog>
 </section>
-        <!-- VIEW: ADMINISTRAÇÃO DE CONTEÚDO E CONFIGURAÇÕES -->
-        <section id="view-admin" class="block w-full max-w-[1400px] mx-auto px-4 md:px-8">
-            <section id="availability-panel" class="panel-head"><span class="panel-symbol" aria-hidden="true">▱</span><div><h2>Disponibilidade do portfólio</h2><p>Ative ou desative a exibição do catálogo no site do cliente.</p></div>
-<button id="maintenanceSwitch" disabled class="my-2 rounded bg-white text-black px-4 py-2">Consultando status…</button>
-</section>
-<!-- Identidade Visual do App -->
+        <section id="view-settings" class="hidden max-w-[1200px] mx-auto px-4"><h1 class="text-2xl font-bold mb-4">Configurações</h1><!-- Identidade Visual do App -->
             <div class="bg-brand-panel border border-brand-gold/30 rounded-2xl p-4 md:p-6 mb-6 md:mb-8 shadow-lg flex flex-col lg:flex-row gap-6">
                 <div class="flex-grow">
                     <h2 class="text-brand-gold text-lg font-bold mb-4 flex items-center gap-2">
@@ -250,16 +259,20 @@ header .nav-link.active{color:#f1d08c;border-bottom:2px solid #d6b778}
                 </div>
             </div>
 
-            <div class="bg-brand-panel border border-red-500/30 rounded-2xl p-4 md:p-6 mb-6 md:mb-8 shadow-lg">
-                <h2 class="text-red-400 text-lg font-bold mb-2 flex items-center gap-2"><i class="ph ph-youtube-logo"></i> Conexão direta com o YouTube</h2>
+            <details id="youtube-settings" class="workpanel border border-red-500/30 rounded-2xl p-4 md:p-6 mb-6 md:mb-8 shadow-lg">
+                <summary class="text-red-400 text-lg font-bold mb-2 flex items-center gap-2"><i class="ph ph-youtube-logo"></i> Conexão direta com o YouTube</summary>
                 <p class="text-xs text-brand-text mb-4">Use o mesmo Client ID OAuth do projeto Google liberado para seu canal. Esta configuração pertence somente ao streaming e não conecta este site à plataforma de cursos. O envio acontece do navegador para o YouTube, como não listado.</p>
                 <div class="flex flex-col sm:flex-row gap-3"><input id="youtube-client-id" type="text" autocomplete="off" placeholder="Client ID OAuth terminado em .apps.googleusercontent.com" class="w-full p-3 rounded-xl bg-black/30 text-white text-sm border border-white/10"><button type="button" onclick="salvarIntegracaoYoutube()" class="shrink-0 bg-red-600 hover:bg-red-500 text-white px-6 py-3 rounded-xl font-bold text-sm">Salvar conexão</button></div>
-                <details class="mt-4"><summary>Gerenciar vídeo enviado</summary><label class="block mt-3">Link do vídeo ou Short<input id="managedLink" class="w-full bg-black p-2" type="url"></label><label class="block text-sm">Visibilidade no YouTube<select id="managed-privacy" class="block w-full rounded bg-black p-2"><option value="unlisted">Não listado (apenas com link)</option><option value="public">Público</option><option value="private">Privado</option></select></label><button id="changePrivacy" class="p-2 underline">Atualizar visibilidade</button><button id="checkVideo" class="p-2 underline">Consultar processamento</button></details>
+                <button class="workbutton" id="authorize-youtube" type="button">Conectar conta do YouTube</button><p id="youtube-session-status" role="status"></p><details class="mt-4"><summary>Gerenciar vídeo enviado</summary><label class="block mt-3">Link do vídeo ou Short<input id="managedLink" class="w-full bg-black p-2" type="url"></label><label class="block text-sm">Visibilidade no YouTube<select id="managed-privacy" class="block w-full rounded bg-black p-2"><option value="unlisted">Não listado (apenas com link)</option><option value="public">Público</option><option value="private">Privado</option></select></label><button id="changePrivacy" class="p-2 underline">Atualizar visibilidade</button><button id="checkVideo" class="p-2 underline">Consultar processamento</button></details>
 <label class="block text-sm mt-4">Conta preferida para o YouTube<input id="youtubeHint" type="email" class="block w-full bg-black p-2 rounded"></label><button id="rememberYoutube" type="button" class="underline text-sm">Salvar conta neste navegador</button>
 <button type="button" id="deleteManaged" class="block text-red-400 underline mt-3">Excluir do YouTube o vídeo do link informado</button>
 <p id="ytResult" class="text-sm mt-2" aria-live="polite"></p><p id="youtube-connection-status" class="text-[11px] text-brand-text mt-3">Carregando configuração...</p><p class="text-[10px] text-brand-text mt-2">A origem HTTPS deste painel também precisa estar autorizada no Google Cloud. Não cole Client Secret. Projetos Google ainda não auditados podem restringir envios à privacidade.</p>
-            </div>
-
+            </details></section>
+        <!-- VIEW: ADMINISTRAÇÃO DE CONTEÚDO E CONFIGURAÇÕES -->
+        <section id="view-admin" class="block w-full max-w-[1400px] mx-auto px-4 md:px-8">
+            <section id="availability-panel" class="panel-head"><span class="panel-symbol" aria-hidden="true">▱</span><div><h2>Disponibilidade do portfólio</h2><p>Ative ou desative a exibição do catálogo no site do cliente.</p></div>
+<button id="maintenanceSwitch" disabled class="my-2 rounded bg-white text-black px-4 py-2">Consultando status…</button>
+</section>
             <!-- Edição de Ordem e Logos das Categorias -->
             <div class="bg-brand-panel border border-brand-gold/30 rounded-2xl p-4 md:p-6 mb-6 md:mb-8 shadow-lg">
                 <div class="flex flex-col lg:flex-row justify-between lg:items-center mb-4 gap-4">
@@ -377,9 +390,9 @@ header .nav-link.active{color:#f1d08c;border-bottom:2px solid #d6b778}
                                 <div class="w-full flex flex-col gap-2">
                                     <input type="file" id="upload-video" accept="video/*" class="hidden" onchange="previewVideo(event)">
                                     <button type="button" onclick="document.getElementById('upload-video').click()" class="w-full bg-[#D6B778] hover:bg-[#e8c989] text-black px-4 py-3 rounded-xl font-bold text-sm shadow-sm transition">Selecionar arquivo de vídeo</button>
-                                    <label class="text-[10px] text-brand-text font-bold uppercase">Formato de envio<select id="admin-video-format" class="mt-1 w-full p-2.5 rounded-lg bg-black/40 text-white text-xs border border-white/10"><option value="full">Vídeo normal</option><option value="short">Short vertical</option></select></label><label class="block text-sm">Visibilidade no YouTube<select id="admin-privacy" class="block w-full rounded bg-black p-2"><option value="unlisted">Não listado (apenas com link)</option><option value="public">Público</option><option value="private">Privado</option></select></label>
+                                    <details class="workpanel"><summary>Envio direto ao YouTube</summary><button type="button" class="underline text-sm" onclick="navigate('settings'); document.getElementById('youtube-settings').open=true">Configurar conexão</button><label class="text-[10px] text-brand-text font-bold uppercase">Formato de envio<select id="admin-video-format" class="mt-1 w-full p-2.5 rounded-lg bg-black/40 text-white text-xs border border-white/10"><option value="full">Vídeo normal</option><option value="short">Short vertical</option></select></label><label class="block text-sm">Visibilidade no YouTube<select id="admin-privacy" class="block w-full rounded bg-black p-2"><option value="unlisted">Não listado (apenas com link)</option><option value="public">Público</option><option value="private">Privado</option></select></label>
                                     <button type="button" id="btn-send-main-youtube" onclick="enviarVideoPrincipalYoutube()" class="w-full bg-red-600 hover:bg-red-500 text-white px-4 py-3 rounded-xl font-bold text-xs shadow-sm transition"><i class="ph ph-youtube-logo mr-1"></i> Enviar vídeo ao YouTube</button>
-                                    <p class="text-[10px] text-brand-text">Para Shorts, selecione o formato vertical. A classificação final é feita pelo YouTube após o processamento.</p>
+                                    <p class="text-[10px] text-brand-text">Para Shorts, selecione o formato vertical. A classificação final é feita pelo YouTube após o processamento.</p></details>
                                     <button type="button" onclick="gerarCapaDoVideo()" class="w-full bg-brand-blue hover:bg-brand-blue-hover text-white px-4 py-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition">
                                         <i class="ph ph-camera text-lg"></i> Extrair Capa do Vídeo
                                     </button>
@@ -721,8 +734,31 @@ header .nav-link.active{color:#f1d08c;border-bottom:2px solid #d6b778}
     })();
     </script>
 
+    <script>
+        window.navigate = function(viewId) {
+            document.getElementById('view-settings').classList.add('hidden');
+            document.getElementById('view-admin').classList.add('hidden');
+            document.getElementById('view-published').classList.add('hidden');
+            document.getElementById('view-ads').classList.add('hidden');
+            document.getElementById('view-publicidade').classList.add('hidden');
+            document.getElementById('view-cloud').classList.add('hidden');
+            document.getElementById('view-leads').classList.add('hidden');
+            document.getElementById('view-gallery').classList.add('hidden');
+            document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
+            
+            const targetView = document.getElementById(`view-${viewId}`);
+            if(targetView) {
+                targetView.classList.remove('hidden');
+                document.getElementById(`nav-${viewId}`).classList.add('active');
+                
+                window.dispatchEvent(new CustomEvent('admin-view', {detail:viewId}));
+            }
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        };
+
+    </script>
     <!-- SCRIPTS -->
-    <script type="module">
+    <script type="module" onerror="document.getElementById('admin-service-status').textContent='Falha ao carregar os serviços do painel. Verifique a conexão e recarregue a página.'">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, runTransaction, collection, addDoc, onSnapshot, deleteDoc, doc, setDoc, getDoc, getDocs, updateDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
@@ -783,25 +819,6 @@ header .nav-link.active{color:#f1d08c;border-bottom:2px solid #d6b778}
 
         // AUTH
         const initAuth = async () => { try { await signInAnonymously(auth); } catch (e) { document.getElementById('admin-service-status').textContent='Falha ao conectar ao Firebase. Recarregue a página para tentar novamente.'; } };
-        initAuth();
-        onAuthStateChanged(auth, (user) => {
-            currentUser = user;
-            if (user) {
-                document.getElementById('admin-service-status').textContent='';
-                carregarBrandingRealtime();
-                carregarOrdemELogosCategorias();
-                carregarCatalogoRealtime();
-                carregarUsuariosRealtime();
-                carregarConfigAnunciosRealtime();
-                carregarIntegracaoYoutube();
-                onSnapshot(configDoc('salas'),snap=>{rooms=Object.assign(Object.create(null),snap.data());renderGallery();});
-                onSnapshot(maintenanceRef,snap => {
-                    maintenanceEnabled = snap.data()?.active === true;
-                    paintSwitch(); maintenanceSwitch.disabled = false;
-                }, () => maintenanceSwitch.textContent = 'Falha ao consultar disponibilidade');
-            }
-        });
-
         window.showToast = (msg, isError = false) => {
             const t = document.getElementById('toast');
             document.getElementById('toast-msg').innerText = msg;
@@ -856,6 +873,7 @@ header .nav-link.active{color:#f1d08c;border-bottom:2px solid #d6b778}
         }
         document.getElementById('checkVideo').onclick = () => manageVideo(false);
         document.getElementById('changePrivacy').onclick = () => manageVideo(true);
+        document.getElementById('youtube-client-id').value = youtubeClientId;
         window.carregarIntegracaoYoutube = function() {
             onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'configuracoes', 'youtube_upload'), (snap) => {
                 youtubeClientId = String(snap.data()?.clientId || '').trim() || defaultYoutubeClientId;
@@ -885,7 +903,8 @@ header .nav-link.active{color:#f1d08c;border-bottom:2px solid #d6b778}
 
         const youtubeSessions=new Map();
         const hintInput=document.getElementById('youtubeHint');
-        let preferredAccount=localStorage.getItem('aem.youtube.account') ?? 'aem.producoes.visuais@gmail.com';
+        let preferredAccount='aem.producoes.visuais@gmail.com';
+        try { preferredAccount=localStorage.getItem('aem.youtube.account') ?? preferredAccount; } catch {}
         hintInput.value=preferredAccount;
         document.getElementById('rememberYoutube').onclick=()=>{
             if(!hintInput.reportValidity())return;
@@ -915,6 +934,14 @@ header .nav-link.active{color:#f1d08c;border-bottom:2px solid #d6b778}
                 client.requestAccessToken({prompt:preferredAccount?'':'select_account'});
             });
         }
+
+        document.getElementById('authorize-youtube').onclick = async function() {
+            const status = document.getElementById('youtube-session-status');
+            this.disabled = true;
+            try { await ensureYoutubeIdentity(); status.textContent = 'Envio autorizado nesta sessão.'; }
+            catch (error) { status.textContent = error.message; }
+            finally { this.disabled = false; }
+        };
 
         function uploadError(status,body){
             if(status===401)youtubeSessions.clear();
@@ -980,26 +1007,6 @@ header .nav-link.active{color:#f1d08c;border-bottom:2px solid #d6b778}
             finally { btn.disabled = false; btn.innerText = 'Enviar vídeo ao YouTube'; }
         };
 
-        window.navigate = function(viewId) {
-            document.getElementById('view-admin').classList.add('hidden');
-            document.getElementById('view-published').classList.add('hidden');
-            document.getElementById('view-ads').classList.add('hidden');
-            document.getElementById('view-publicidade').classList.add('hidden');
-            document.getElementById('view-cloud').classList.add('hidden');
-            document.getElementById('view-leads').classList.add('hidden');
-            document.getElementById('view-gallery').classList.add('hidden');
-            document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
-            
-            const targetView = document.getElementById(`view-${viewId}`);
-            if(targetView) {
-                targetView.classList.remove('hidden');
-                document.getElementById(`nav-${viewId}`).classList.add('active');
-                if(viewId === 'leads') renderLeadDirectory();
-                if(viewId === 'cloud') carregarArquivosR2();
-            }
-            window.scrollTo({ top: 0, behavior: 'smooth' });
-        };
-
         // ADMIN FUNÇÕES (BRANDING E CATÁLOGO PRINCIPAL)
         window.previewAppLogo = function(e) {
             const f = e.target.files[0];
@@ -1021,29 +1028,26 @@ header .nav-link.active{color:#f1d08c;border-bottom:2px solid #d6b778}
             btn.innerText = "Salvando..."; btn.disabled = true;
 
             try {
-                let finalLogoUrl = currentAppLogoUrl;
+                const colorHex = document.getElementById('app-color-hex').value.trim();
+                if (!/^#[0-9a-f]{6}$/i.test(colorHex)) throw Error('Use uma cor no formato #RRGGBB.');
+                const changes = {corPrincipal: colorHex, updatedAt: Date.now()};
                 
                 if (selectedAppLogoFile) {
                     showToast("Subindo novo logo...");
                     const ext = selectedAppLogoFile.name.split('.').pop();
                     const fileName = `branding/${Date.now()}_logo.${ext}`;
                     await getStorage().putObject({ Bucket: "aem", Key: fileName, Body: selectedAppLogoFile, ContentType: selectedAppLogoFile.type }).promise();
-                    finalLogoUrl = `https://pub-a62c7f1bfc0248cab53121a7a3f99245.r2.dev/${fileName}`;
+                    changes.logoUrl = `https://pub-a62c7f1bfc0248cab53121a7a3f99245.r2.dev/${fileName}`;
                 }
 
-                const colorHex = document.getElementById('app-color-hex').value;
-
-                await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'configuracoes', 'branding'), { 
-                    logoUrl: finalLogoUrl, corPrincipal: colorHex, updatedAt: new Date().getTime()
-                });
-                
+                await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'configuracoes', 'branding'), changes, {merge:true});
                 selectedAppLogoFile = null;
-                currentAppLogoUrl = finalLogoUrl;
+                document.getElementById('upload-app-logo').value = '';
                 showToast("Identidade Visual atualizada!");
                 if (document.getElementById('site-preview-iframe').hasAttribute('src')) document.getElementById('site-preview-iframe').src = document.getElementById('site-preview-iframe').dataset.url;
             } catch (err) {
                 console.error(err);
-                showToast("Erro ao salvar Identidade Visual.", true);
+                showToast(err.message || "Erro ao salvar Identidade Visual.", true);
             } finally {
                 btn.innerText = "Salvar Identidade"; btn.disabled = false;
             }
@@ -1714,7 +1718,7 @@ header .nav-link.active{color:#f1d08c;border-bottom:2px solid #d6b778}
             first.before(section);nodes.forEach(el=>section.append(el));
         }
         const adminView=document.getElementById('view-admin');
-        groupFields(adminView,[...adminView.children].filter(el=>el.matches('div') && !el.matches('.grid')),'Identidade, integrações e ordem das categorias');
+        groupFields(adminView,[...adminView.children].filter(el=>el.matches('div') && !el.matches('.grid')),'Ordem e logos das categorias');
         const configDoc = name => doc(db,'artifacts',appId,'public','data','configuracoes',name);
         let rooms = Object.create(null);
         const galleryFormat = document.getElementById('galleryFormat');
@@ -1944,6 +1948,9 @@ header .nav-link.active{color:#f1d08c;border-bottom:2px solid #d6b778}
                 if(!selector.value)document.getElementById('form-metadados').classList.add('hidden');
                 
                 renderListaOrdem(Array.from(categoriasExistem));
+            }, error => {
+                document.getElementById('admin-lista-conteudo').textContent = 'Falha ao carregar o catálogo: ' + error.message;
+                document.getElementById('admin-service-status').textContent = 'Falha ao consultar o catálogo no Firebase.';
             });
         }
 
@@ -2612,3 +2619,57 @@ header .nav-link.active{color:#f1d08c;border-bottom:2px solid #d6b778}
             } finally {refreshingR2=false;}
         };
 
+        window.excluirArquivoR2Silencioso = async function(url) {
+            try {
+                const parsed = new URL(String(url || ''));
+                if (parsed.hostname !== 'pub-a62c7f1bfc0248cab53121a7a3f99245.r2.dev') return false;
+                const key = decodeURIComponent(parsed.pathname.replace(/^\//, ''));
+                if (!key) return false;
+                await getStorage().deleteObject({ Bucket: 'aem', Key: key }).promise();
+                return true;
+            } catch (error) { console.error('Falha ao excluir objeto R2:', error); throw error; }
+        };
+
+        window.excluirArquivoR2 = async function(encodedKey) {
+            let key = '';
+            try { key = decodeURIComponent(encodedKey); } catch { key = String(encodedKey || ''); }
+            if (!key) return showToast('Arquivo inválido.', true);
+            if(!confirm(`Tem a certeza que deseja EXCLUIR DEFINITIVAMENTE o ficheiro "${key}" do servidor R2? Esta ação não pode ser desfeita.`)) return;
+            
+            try {
+                const params = { Bucket: "aem", Key: key };
+                await getStorage().deleteObject(params).promise();
+                showToast("Arquivo excluído do bucket Cloudflare R2.");
+                await carregarArquivosR2();
+            } catch(e) {
+                console.error('Erro ao excluir objeto R2:', e);
+                showToast(e?.message || "Erro ao excluir do R2. Confira as permissões de exclusão do bucket.", true);
+            }
+        };
+
+        window.addEventListener('admin-view', e => {
+            if (e.detail === 'leads') renderLeadDirectory();
+            if (e.detail === 'cloud' && currentUser) carregarArquivosR2();
+        });
+        initAuth();
+        onAuthStateChanged(auth, (user) => {
+            currentUser = user;
+            if (user) {
+                document.getElementById('admin-service-status').textContent='';
+                carregarBrandingRealtime();
+                carregarOrdemELogosCategorias();
+                carregarCatalogoRealtime();
+                carregarUsuariosRealtime();
+                carregarConfigAnunciosRealtime();
+                carregarIntegracaoYoutube();
+                onSnapshot(configDoc('salas'),snap=>{rooms=Object.assign(Object.create(null),snap.data());renderGallery();});
+                onSnapshot(maintenanceRef,snap => {
+                    maintenanceEnabled = snap.data()?.active === true;
+                    paintSwitch(); maintenanceSwitch.disabled = false;
+                }, () => maintenanceSwitch.textContent = 'Falha ao consultar disponibilidade');
+            }
+        });
+
+</script>
+<dialog id="deleteYoutubeDialog" class="m-auto rounded-xl bg-brand-panel text-white p-5 max-w-md"><form method="dialog"><h2 class="font-bold">Excluir permanentemente do YouTube?</h2><p id="deleteYoutubeInfo" class="my-3"></p><output id="deleteYoutubeStatus" aria-live="polite"></output><div class="flex gap-4 mt-4"><button value="cancel">Fechar</button><button type="button" id="deleteYoutubeConfirm" class="bg-red-700 rounded px-3 py-2">Autorizar exclusão</button></div></form></dialog></body>
+</html>
