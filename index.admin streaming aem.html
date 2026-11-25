@@ -120,7 +120,6 @@ let dP; window.addEventListener('beforeinstallprompt', e => { e.preventDefault()
 const isIos = () => /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCase()); const isStandalone = () => ('standalone' in window.navigator) && window.navigator.standalone; if (isIos() && !isStandalone()) { const ib = document.createElement('div'); ib.innerHTML = 'Para instalar como App: toque em <b>Compartilhar</b> e depois <b>Adicionar ao Ecrã Principal</b><button style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;color:#a1a1aa;font-size:16px;" onclick="this.parentElement.remove()">✕</button>'; ib.style.cssText = 'position:fixed;bottom:0;left:0;width:100%;background:#1c1e2b;color:#fff;padding:15px 30px 15px 15px;font-family:sans-serif;font-size:12px;text-align:center;z-index:99999;border-top:1px solid #2b2d3a;box-shadow:0 -5px 15px rgba(0,0,0,0.2);'; setTimeout(() => document.body.appendChild(ib), 2000); }
 </script>
 <style>main :is(.flex-1,.flex-grow,.grid > *){min-width:0}main input,main select,main textarea{max-width:100%}main label{overflow-wrap:anywhere} @media(max-width:680px){main .backdrop-blur-xl{backdrop-filter:none} main button{white-space:normal}}</style><style>.workpanel{border:1px solid #343941;background:#15191f;border-radius:12px;padding:1rem;margin:1rem 0}.workpanel summary{font-weight:650;cursor:pointer}.workpanel form{margin-top:1rem}.room-form{display:grid;gap:1rem;max-width:50rem}.workpanel input,.workpanel textarea{display:block;background:#090b0e;color:white;border:1px solid #434952;padding:.6rem;border-radius:6px;width:100%}.workbutton{border-radius:8px;background:#d6b778;color:black;padding:.65rem 1rem;margin:.5rem 0}.danger{background:#8e3038;color:white}#view-gallery h2{display:flex;align-items:center;justify-content:space-between;gap:1rem}#form-metadados{gap:1rem}#form-metadados details>div{margin-top:.75rem}#site-preview-iframe{background:#171a20}header nav button{min-height:42px}</style><script async src="https://accounts.google.com/gsi/client"></script><style>
-body.batch-active #single-panel,
 #batch-progress[hidden],#batch-finish[hidden]{display:none!important}
 #batch-bar{width:100%;height:12px;accent-color:#d6b778}
 #batch-progress{padding:12px;background:#20232b;border-radius:10px}
@@ -165,10 +164,18 @@ header .nav-link.active{color:#f1d08c;border-bottom:2px solid #d6b778}
 .published-edit{display:flex;flex:1;align-items:center;gap:12px;min-width:0;padding:9px 12px;text-align:left;flex-wrap:wrap}
 .published-edit img{width:64px;height:40px;object-fit:cover;border-radius:5px}
 .published-edit strong{overflow-wrap:anywhere}.edit-caption{margin-left:auto;color:#e5c680}.published-row>button:last-child{padding:12px}
-@media(min-width:820px){#catalog-workspace{grid-template-columns:repeat(2,minmax(0,1fr))}#preview-panel{grid-column:1/-1}body.batch-active #preview-panel{grid-column:auto}}
-@media(min-width:1240px){#catalog-workspace{grid-template-columns:minmax(0,1.04fr) minmax(0,1fr) minmax(0,1.75fr)}#preview-panel{grid-column:auto;position:sticky;top:86px}body.batch-active #catalog-workspace{grid-template-columns:minmax(0,1fr) minmax(0,1.3fr)}}
 </style><style>
-body.batch-grid #catalog-workspace{display:block}body.batch-grid #preview-panel{display:none}
+.catalog-modes{display:flex;flex-wrap:wrap;gap:8px;margin:20px 0 14px}
+.catalog-modes button,#preview-expand{padding:10px 18px;border:1px solid #474951;border-radius:8px;color:#eee;background:#202329;font-weight:650}
+.catalog-modes [aria-pressed="true"]{background:#e6c37f;color:#19140b;border-color:#e6c37f}
+#catalog-workspace>[hidden]{display:none!important}
+#single-panel,#batch-panel{padding:clamp(16px,2.4vw,36px)}
+#single-panel.is-dragging{outline:3px dashed #e6c37f;outline-offset:-5px}
+#video-drop-hint{color:#c1c5cf;font-size:13px}
+#preview-panel:fullscreen,#preview-panel.preview-expanded{display:flex;flex-direction:column;background:#101317;border-radius:0;padding:12px;width:100%;height:100%}
+#preview-panel.preview-expanded{position:fixed;inset:0;z-index:99999}
+#preview-panel:fullscreen>div:last-child,#preview-panel.preview-expanded>div:last-child{flex:1;min-height:0;height:auto}
+body.preview-locked{overflow:hidden}
 .batch-cards{display:grid;gap:12px}body.batch-grid .batch-cards{grid-template-columns:repeat(2,minmax(0,1fr))}
 @media(min-width:1000px){body.batch-grid .batch-cards{grid-template-columns:repeat(4,minmax(0,1fr))}}
 @media(min-width:1500px){body.batch-grid .batch-cards{grid-template-columns:repeat(5,minmax(0,1fr))}}
@@ -313,7 +320,11 @@ body.batch-grid #catalog-workspace{display:block}body.batch-grid #preview-panel{
             </div>
 
             <!-- Formulário Principal e Iframe -->
-            <div id="catalog-workspace" class="grid"><section id="batch-panel" class="catalog-panel">
+            <nav class="catalog-modes" aria-label="Modo de publicação">
+                <button id="mode-single" type="button" aria-controls="single-panel" aria-pressed="true">Publicação única</button>
+                <button id="mode-batch" type="button" aria-controls="batch-panel" aria-pressed="false">Publicação em massa</button>
+            </nav>
+            <div id="catalog-workspace" class="grid"><section hidden id="batch-panel" class="catalog-panel">
  <div class="panel-head"><span class="panel-symbol" aria-hidden="true">↥</span><div><h2>Publicação em massa</h2><p>Selecione os vídeos e prepare a lista de envio.</p></div></div>
  <fieldset id="batch-fields" class="mt-4 grid gap-3">
   <div class="grid sm:grid-cols-2 gap-3">
@@ -410,6 +421,7 @@ body.batch-grid #catalog-workspace{display:block}body.batch-grid #preview-panel{
                                     <i id="preview-video-icon" class="ph-fill ph-play text-white text-4xl z-10"></i>
                                 </div>
                                 <div class="w-full flex flex-col gap-2">
+                                    <span id="video-drop-hint" role="status">Arraste um vídeo para este painel ou selecione o arquivo abaixo.</span>
                                     <input type="file" id="upload-video" accept="video/*" class="hidden" onchange="previewVideo(event)">
                                     <button type="button" onclick="document.getElementById('upload-video').click()" class="w-full bg-[#D6B778] hover:bg-[#e8c989] text-black px-4 py-3 rounded-xl font-bold text-sm shadow-sm transition">Selecionar arquivo de vídeo</button>
                                     <details class="workpanel"><summary>Envio direto ao YouTube</summary><button type="button" class="underline text-sm" onclick="navigate('settings'); document.getElementById('youtube-settings').open=true">Configurar conexão</button><label class="text-[10px] text-brand-text font-bold uppercase">Formato de envio<select id="admin-video-format" class="mt-1 w-full p-2.5 rounded-lg bg-black/40 text-white text-xs border border-white/10"><option value="full">Vídeo normal</option><option value="short">Short vertical</option></select></label><label class="block text-sm">Visibilidade no YouTube<select id="admin-privacy" class="block w-full rounded bg-black p-2"><option value="unlisted">Não listado (apenas com link)</option><option value="public">Público</option><option value="private">Privado</option></select></label>
@@ -449,6 +461,7 @@ body.batch-grid #catalog-workspace{display:block}body.batch-grid #preview-panel{
                 <!-- COLUNA DIREITA: Preview Live do Site Cliente -->
                 <div id="preview-panel" class="catalog-panel">
                     <div class="panel-head"><span class="panel-symbol" aria-hidden="true">▣</span><div><h2>Site cliente (ao vivo)</h2></div>
+                        <button type="button" id="preview-expand" aria-pressed="false">Tela cheia</button>
                         <button onclick="const frame=document.getElementById('site-preview-iframe'); frame.src=frame.dataset.url" class="w-full sm:w-auto text-[10px] text-brand-text hover:text-white border border-white/10 px-6 py-3 sm:py-2 rounded-full transition uppercase font-bold flex items-center justify-center gap-2 bg-[#2A2C33] shadow-md">
                             <i class="ph ph-arrows-clockwise text-sm md:text-base"></i> Abrir / atualizar prévia
                         </button>
@@ -982,6 +995,39 @@ body.batch-grid #catalog-workspace{display:block}body.batch-grid #preview-panel{
         window.addEventListener('admin-view', e => {
             if (e.detail === 'cloud') carregarArquivosR2();
         });
+    </script>
+    <script>
+    (() => {
+        window.selectPublicationMode = mode => {
+            for (const name of ['single','batch']) {
+                document.getElementById(name+'-panel').hidden = name !== mode;
+                document.getElementById('mode-'+name).setAttribute('aria-pressed', String(name === mode));
+            }
+        };
+        for (const name of ['single','batch']) {
+            document.getElementById('mode-'+name).onclick = () => selectPublicationMode(name);
+        }
+        const preview=document.getElementById('preview-panel'), expand=document.getElementById('preview-expand');
+        function expanded(){return document.fullscreenElement===preview || preview.classList.contains('preview-expanded');}
+        function sync(){
+            expand.textContent=expanded()?'Sair da tela cheia':'Tela cheia';
+            expand.setAttribute('aria-pressed',String(expanded()));
+            document.body.classList.toggle('preview-locked',expanded());
+        }
+        async function close(){
+            preview.classList.remove('preview-expanded');
+            if(document.fullscreenElement===preview)await document.exitFullscreen();
+            sync();
+        }
+        expand.onclick=async()=>{
+            if(expanded()){await close();return;}
+            try{await preview.requestFullscreen();}
+            catch{preview.classList.add('preview-expanded');}
+            sync();
+        };
+        document.addEventListener('fullscreenchange',sync);
+        document.addEventListener('keydown',event=>{if(event.key==='Escape' && expanded())close();});
+    })();
     </script>
     <!-- SCRIPTS -->
     <script type="module">
@@ -1741,11 +1787,37 @@ body.batch-grid #catalog-workspace{display:block}body.batch-grid #preview-panel{
                 message.textContent=error.message;
             }finally{publishingBatch=false;batchElement('fields').disabled=false;refreshBatch();scanPublished();}
         };
-        window.previewVideo = function(e) {
-            const f = e.target.files[0];
+        window.previewVideo = event => selectSingleVideo(event.target.files[0]);
+        const singlePanel=document.getElementById('single-panel');
+        const dropHint=document.getElementById('video-drop-hint');
+        const hasFiles=event=>Array.from(event.dataTransfer?.types || []).includes('Files');
+        singlePanel.addEventListener('dragover',event=>{
+            if(!hasFiles(event) || event.target.closest('input[type=file]'))return;
+            event.preventDefault();
+            event.dataTransfer.dropEffect='copy';
+            singlePanel.classList.add('is-dragging');
+        });
+        singlePanel.addEventListener('dragleave',event=>{
+            if(!singlePanel.contains(event.relatedTarget))singlePanel.classList.remove('is-dragging');
+        });
+        singlePanel.addEventListener('drop',event=>{
+            singlePanel.classList.remove('is-dragging');
+            if(!hasFiles(event) || event.target.closest('input[type=file]'))return;
+            event.preventDefault();
+            if(document.getElementById('form-conteudo').inert || document.getElementById('btn-send-main-youtube').disabled)return;
+            const files=event.dataTransfer.files;
+            if(files.length!==1){dropHint.textContent='Para vários arquivos, use Publicação em massa.';return;}
+            const file=files[0];
+            if(!file.type.startsWith('video/') && !/\.(mp4|mov|m4v|webm|mkv|avi|mpg|mpeg|mts|m2ts|wmv)$/i.test(file.name)){
+                dropHint.textContent='Selecione um arquivo de vídeo.';return;
+            }
+            selectSingleVideo(file);
+        });
+        function selectSingleVideo(f) {
             if (f) {
                 document.getElementById('admin-titulo').value = titleFromFile(f);
                 window.selectedVideoFile = f;
+                dropHint.textContent='Vídeo selecionado: '+f.name+'. Você pode editar o título.';
                 selectedVideoYoutubeUrl = '';
                 const videoUrl = URL.createObjectURL(f);
                 const formPreview = document.getElementById('admin-form-video-preview');
@@ -1859,6 +1931,7 @@ body.batch-grid #catalog-workspace{display:block}body.batch-grid #preview-panel{
         window.limparFormularioAdmin = function() {
             editandoId = null;
             mainTrailers.reset();
+            dropHint.textContent='Arraste um vídeo para este painel ou selecione o arquivo abaixo.';
             document.getElementById('form-conteudo').reset();syncTrailerVisibility();
             window.selectedCoverFile = null; window.selectedVideoFile = null;
             selectedVideoYoutubeUrl = '';
@@ -1879,10 +1952,7 @@ body.batch-grid #catalog-workspace{display:block}body.batch-grid #preview-panel{
             if(!item) return;
 
             if(document.getElementById('btn-salvar-conteudo').disabled)return;
-            if(batchItems.length){
-                showToast('Conclua ou remova a lista em massa antes de editar um conteúdo.',true);
-                return;
-            }
+            selectPublicationMode('single');
             window.navigate('admin');
             editandoId = id;
             mainTrailers.reset(item);
