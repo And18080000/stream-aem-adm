@@ -2300,23 +2300,35 @@ body.preview-locked{overflow:hidden}
                 processing:'Processando',unknown:'A verificar',unavailable:'Indisponível'})[check.kind] ||
                 (check.ready?'Verificado':'Indisponível');
         }
+        function statusParcial(check){
+            return check?.kind==='partial' || (!check?.kind && check?.reason==='YouTube bloqueia a reprodução no Brasil.');
+        }
+        function listarNoPortfolio(item,id){
+            const decision=item.youtubeDecision;
+            if(decision?.id===id && typeof decision.visible==='boolean')return decision.visible;
+            const check=item.youtubeCheck;
+            return check?.id===id && (statusParcial(check) || check.ready===true);
+        }
         function videoDecisionActions(item,id,action){
             action('Detalhes no YouTube Studio',()=>window.open('https://studio.youtube.com/video/'+encodeURIComponent(id)+'/copyright','_blank','noopener'));
-            const check=item.youtubeCheck;
-            if(check?.id!==id || (item.youtubeDecision?.id!==id && !['blocked','embed','partial','age','private','unavailable'].includes(check.kind)))return;
-            const visible=item.youtubeDecision?.id===id ? item.youtubeDecision.visible : check.ready;
-            action(visible?'Ocultar no portfólio':'Liberar no portfólio',async()=>{
-                if(!visible && !check.ready && !confirm('Exibir este título no catálogo? A reprodução continua sujeita às permissões do YouTube.'))return;
+            portfolioActions(item,id,action);
+        }
+        function portfolioActions(item,id,action){
+            const manual=item.youtubeDecision?.id===id && typeof item.youtubeDecision.visible==='boolean';
+            const visible=listarNoPortfolio(item,id);
+            async function salvar(visible){
                 try{
                     const ref=doc(db,'artifacts',appId,'public','data','catalog',item.id);
                     await runTransaction(db,async tx=>{
                         const current=(await tx.get(ref)).data();
                         if(!current || galleryYoutubeId(current.videoUrl || current.trailerUrl)!==id)throw Error('O vídeo foi alterado. Confira o cadastro atual.');
-                        tx.update(ref,{youtubeDecision:{id,visible:!visible}});
+                        tx.update(ref,{youtubeDecision:{id,visible}});
                     });
-                    showToast(visible?'Título ocultado.':'Título liberado no portfólio.');
+                    showToast(visible?'Título liberado no portfólio.':'Título ocultado.');
                 }catch(e){showToast(e.message,true);}
-            });
+            }
+            if(!manual || !visible)action('Liberar no portfólio',()=>salvar(true));
+            if(!manual || visible)action('Ocultar no portfólio',()=>salvar(false));
         }
         async function lookupVideos(ids,token){
             const res=await fetch('https://www.googleapis.com/youtube/v3/videos?part=status,contentDetails&id='+ids.join(','),{headers:{Authorization:'Bearer '+token}});
@@ -2333,9 +2345,10 @@ body.preview-locked{overflow:hidden}
             const id=galleryYoutubeId(item.videoUrl || item.trailerUrl);
             if (!id) return item.videoUrl ? 'Arquivo vinculado' : 'Sem vídeo principal';
             const check = item.youtubeCheck;
-            if (check?.id !== id || typeof check.ready !== 'boolean') return 'YouTube · A verificar';
-            const visible=item.youtubeDecision?.id===id ? item.youtubeDecision.visible : check.ready;
-            return 'YouTube · '+availabilityLabel(check)+' · '+(visible?'Visível no portfólio':'Oculto no portfólio');
+            const label=check?.id!==id ? 'A verificar' : statusParcial(check) ? 'Parcialmente bloqueado' : availabilityLabel(check);
+            const manual=item.youtubeDecision?.id===id && typeof item.youtubeDecision.visible==='boolean';
+            return 'YouTube · '+label+' · '+(listarNoPortfolio(item,id)?'Visível':'Oculto')+' no portfólio'+(manual?' (decisão manual)':'');
+
         }
         function openVideoSettings(url){
             navigate('settings');document.getElementById('youtube-settings').open=true;
@@ -2488,6 +2501,19 @@ body.preview-locked{overflow:hidden}
                 });
 
                 document.getElementById('admin-lista-conteudo').innerHTML = adm || "<p class='text-sm text-brand-text mt-2'>Nenhum conteúdo.</p>";
+                document.querySelectorAll('#admin-lista-conteudo .published-row').forEach((row,index)=>{
+                    const item=cacheCatalogo[index],id=galleryYoutubeId(item.videoUrl || item.trailerUrl);
+                    if(!id)return;
+                    const actions=document.createElement('div');
+                    actions.className='flex flex-wrap gap-2 px-3 pb-2 w-full';
+                    row.style.flexWrap='wrap';
+                    portfolioActions(item,id,(label,run)=>{
+                        const button=document.createElement('button');
+                        button.type='button';button.className='workbutton';button.textContent=label;
+                        button.onclick=run;actions.append(button);
+                    });
+                    row.append(actions);
+                });
                 document.getElementById('existing-categories').innerHTML = Array.from(categoriasExistem).map(c => `<option value="${catalogText(c)}">`).join('');
                 const selector=document.getElementById('meta-select-video'), previous=selector.value;
                 selector.innerHTML=selectOptions;
