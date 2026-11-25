@@ -167,6 +167,14 @@ header .nav-link.active{color:#f1d08c;border-bottom:2px solid #d6b778}
 .published-edit strong{overflow-wrap:anywhere}.edit-caption{margin-left:auto;color:#e5c680}.published-row>button:last-child{padding:12px}
 @media(min-width:820px){#catalog-workspace{grid-template-columns:repeat(2,minmax(0,1fr))}#preview-panel{grid-column:1/-1}body.batch-active #preview-panel{grid-column:auto}}
 @media(min-width:1240px){#catalog-workspace{grid-template-columns:minmax(0,1.04fr) minmax(0,1fr) minmax(0,1.75fr)}#preview-panel{grid-column:auto;position:sticky;top:86px}body.batch-active #catalog-workspace{grid-template-columns:minmax(0,1fr) minmax(0,1.3fr)}}
+</style><style>
+body.batch-grid #catalog-workspace{display:block}body.batch-grid #preview-panel{display:none}
+.batch-cards{display:grid;gap:12px}body.batch-grid .batch-cards{grid-template-columns:repeat(2,minmax(0,1fr))}
+@media(min-width:1000px){body.batch-grid .batch-cards{grid-template-columns:repeat(4,minmax(0,1fr))}}
+@media(min-width:1500px){body.batch-grid .batch-cards{grid-template-columns:repeat(5,minmax(0,1fr))}}
+@media(max-width:540px){body.batch-grid .batch-cards{grid-template-columns:1fr}}
+.batch-cards article{min-width:0;align-content:start;overflow-wrap:anywhere}.batch-cards video,.batch-cards img{max-width:100%;max-height:130px}
+.batch-cards progress{width:100%;accent-color:#d6b778}.batch-issue{border:1px solid #a66c54}
 </style></head>
 <body class="antialiased flex flex-col min-h-screen">
 
@@ -314,7 +322,8 @@ header .nav-link.active{color:#f1d08c;border-bottom:2px solid #d6b778}
   <label>Selecionar arquivos de vídeo<input type="file" multiple accept="video/*" id="batch-files" class="block w-full"></label>
   <label>Vídeos já no YouTube<textarea id="batch-links" placeholder="Um link por linha. Para Shorts, use o link /shorts/ ou selecione Short acima." class="block w-full rounded bg-black p-2"></textarea></label>
   <button type="button" id="batch-add" class="rounded border border-white/20 p-2">Adicionar links à lista</button>
-  <div id="batch-list" class="grid gap-3"></div>
+  <div id="batch-list" class="batch-cards"></div>
+  <details id="batch-errors" class="workpanel" hidden open><summary>Vídeos com erro (<span id="batch-error-count">0</span>)</summary><div class="batch-cards" id="batch-failed-list"></div></details>
   <section id="batch-progress" hidden>
    <label for="batch-bar">Progresso da publicação · <span id="batch-percent">0%</span></label>
    <progress id="batch-bar" value="0" max="100"></progress>
@@ -450,6 +459,10 @@ header .nav-link.active{color:#f1d08c;border-bottom:2px solid #d6b778}
 
         
         <section id="view-published" class="hidden mx-auto px-4 md:px-8">
+            <details id="yt-review" class="workpanel" open><summary>Pendências do YouTube (<span id="yt-issue-count">—</span>)</summary>
+            <button type="button" class="workbutton" id="yt-scan">Verificar vídeos do catálogo</button>
+            <p role="status" id="yt-check-state">Autorize a consulta ao canal para verificar os vídeos.</p>
+            <div id="yt-issues" class="grid gap-2"></div></details>
             <div class="catalog-panel"><div class="panel-head"><span class="panel-symbol" aria-hidden="true">▤</span><h2>Conteúdos publicados</h2></div>
             <div id="admin-lista-conteudo" class="grid gap-2">Carregando catálogo…</div></div>
         </section>
@@ -816,7 +829,7 @@ header .nav-link.active{color:#f1d08c;border-bottom:2px solid #d6b778}
                     client_id: youtubeClientId, scope, ...(preferredAccount ? {login_hint:preferredAccount}:{}),
                     callback: response => {
                         if (response.error || !response.access_token) return reject(Error(response.error_description || response.error || 'Falha ao autorizar a conta.'));
-                        if (!oauth.hasGrantedAllScopes(response,scope)) return reject(Error('A permissão solicitada não foi concedida. Tente novamente e marque a permissão do YouTube.'));
+                        if (!oauth.hasGrantedAllScopes(response,...scope.split(' '))) return reject(Error('A permissão solicitada não foi concedida. Tente novamente e marque a permissão do YouTube.'));
                         youtubeSessions.set(key,{token:response.access_token,until:Date.now()+Math.max(0,Number(response.expires_in)-90)*1000});
                         resolve(response.access_token);
                     },
@@ -1417,7 +1430,18 @@ header .nav-link.active{color:#f1d08c;border-bottom:2px solid #d6b778}
             const failed = batchItems.filter(item => item.failed).length;
             const completed = total > 0 && published === total;
             document.body.classList.toggle('batch-active', total > 0);
-            batchElement('finish').hidden = !completed || publishingBatch;
+            document.body.classList.toggle('batch-grid', total > 5);
+            batchElement('errors').hidden = !failed;
+            batchElement('error-count').textContent = failed;
+            for (const item of batchItems) {
+                const dest = batchElement(item.failed ? 'failed-list' : 'list');
+                if (item.row.parentElement !== dest) dest.append(item.row);
+                item.row.classList.toggle('batch-issue', !!item.failed);
+                item.repair.hidden = !item.failed;
+                item.meter.value = item.done ? 100 : item.progress || 0;
+            }
+            batchElement('finish').hidden = !published || publishingBatch;
+            batchElement('finish').textContent = completed ? 'Concluir e fechar lista' : 'Finalizar os publicados e manter pendências';
             batchElement('send').disabled = publishingBatch || completed;
             batchElement('send').textContent = publishingBatch ? 'Publicando…' : completed ? 'Lista publicada' : failed ? 'Publicar pendentes' : 'Publicar lista';
             if (!total) batchStarted = false;
@@ -1430,8 +1454,8 @@ header .nav-link.active{color:#f1d08c;border-bottom:2px solid #d6b778}
             if (!publishingBatch) batchElement('stage').textContent = completed ? 'Publicação concluída.' : failed ? 'Confira os erros na lista.' : '';
         }
         batchElement('finish').onclick = () => {
-            if (publishingBatch || batchItems.some(item => !item.done)) return;
-            for (const item of [...batchItems]) item.remove();
+            if (publishingBatch) return;
+            for (const item of batchItems.filter(item => item.done)) item.remove();
             batchElement('message').textContent = '';
         };
         const titleFromFile = file => file.name.replace(/\.[^.]+$/, '').trim() || file.name;
@@ -1522,6 +1546,30 @@ header .nav-link.active{color:#f1d08c;border-bottom:2px solid #d6b778}
                 trailerBox.hidden=short;
             };
             item.syncTrailers();
+            item.meter=document.createElement('progress');item.meter.max=100;item.meter.value=0;
+            item.meter.setAttribute('aria-label','Progresso do vídeo');row.append(item.meter);
+            item.repair=document.createElement('div');item.repair.className='grid gap-2';
+            item.repair.innerHTML='<p></p><label>Substituir por um vídeo do YouTube<input type="url" placeholder="Cole o link corrigido"></label><button type="button" class="underline">Usar este link</button><label>Selecionar arquivo corrigido<input type="file" accept="video/*"></label>';
+            item.repair.querySelector('button').onclick=()=>{
+                const url=item.repair.querySelector('[type=url]').value.trim(), id=galleryYoutubeId(url);
+                if(!id){status.textContent='Informe um link válido do YouTube.';return;}
+                if(item.preview){URL.revokeObjectURL(item.preview);item.preview=null;}
+                file=item.file=null;item.youtubeId=id;item.linkedShort=linkedShort=new URL(url).pathname.startsWith('/shorts/');
+                media.pause();media.removeAttribute('src');media.load();media.hidden=capture.hidden=true;
+                poster.src=item.coverPreview || 'https://i.ytimg.com/vi/'+id+'/hqdefault.jpg';poster.hidden=false;
+                item.title='';row.querySelector('strong').textContent=id;item.syncTrailers();status.textContent='Link atualizado. Clique em Publicar pendentes.';
+            };
+            item.repair.querySelector('[type=file]').onchange=e=>{
+                const next=e.target.files[0];if(!next)return;
+                if(item.preview)URL.revokeObjectURL(item.preview);
+                file=item.file=next;item.youtubeId='';item.title=titleFromFile(next);row.querySelector('strong').textContent=item.title;
+                media.hidden=capture.hidden=false;media.onloadedmetadata=item.syncTrailers;
+                media.src=item.preview=URL.createObjectURL(next);status.textContent='Arquivo atualizado. Clique em Publicar pendentes.';
+            };
+            const retry=document.createElement('button');retry.type='button';retry.className='workbutton';
+            retry.textContent='Tentar novamente este vídeo';retry.onclick=()=>publishBatch(item);
+            item.repair.append(retry);
+            row.append(item.repair);
             batchItems.push(item);
             batchElement('message').textContent='';
             refreshBatch();
@@ -1592,10 +1640,11 @@ header .nav-link.active{color:#f1d08c;border-bottom:2px solid #d6b778}
             links.value=invalid.join('\n');
             batchElement('message').textContent=invalid.length?'Confira os links que ficaram no campo.':'';
         };
-        batchElement('send').onclick = async () => {
+        batchElement('send').onclick = () => publishBatch();
+        async function publishBatch(onlyItem) {
             if(publishingBatch)return;
             const message=batchElement('message');
-            const pending=batchItems.filter(item=>!item.done);
+            const pending=batchItems.filter(item=>!item.done && (!onlyItem || item===onlyItem));
             const trilho=batchElement('category').value.trim(), subtitulo=batchElement('rating').value.trim(), selo=batchElement('seal').value.trim();
             if(!currentUser || !pending.length || !trilho || !subtitulo || !selo){
                 message.textContent='Aguarde a autenticação, adicione vídeos e preencha categoria, classificação e selo.';return;
@@ -1607,9 +1656,19 @@ header .nav-link.active{color:#f1d08c;border-bottom:2px solid #d6b778}
             batchElement('stage').textContent='Preparando a publicação…';
             refreshBatch();
             try {
-                if(pending.some(item=>item.file && !item.youtubeId)) await ensureYoutubeIdentity();
+                let authError;
+                if(pending.some(item=>item.file && !item.youtubeId)) {
+                    try {
+                        const combined=uploadScope+' '+readScope;
+                        auditToken=await ensureYoutubeIdentity(combined);
+                        const prefix=youtubeClientId+'|'+preferredAccount+'|';
+                        const grant=youtubeSessions.get(prefix+combined);
+                        auditUntil=grant.until;youtubeSessions.set(prefix+uploadScope,grant);youtubeSessions.set(prefix+readScope,grant);
+                    } catch(error){authError=error;}
+                }
                 for(const item of pending){
                     try {
+                        if(authError && item.file && !item.youtubeId) throw authError;
                         const label = item.title || item.youtubeId;
                         const stage = text => {item.status.textContent=text;batchElement('stage').textContent=label+' · '+text;};
                         stage('Verificando vídeo…');
@@ -1647,7 +1706,15 @@ header .nav-link.active{color:#f1d08c;border-bottom:2px solid #d6b778}
                         item.status.textContent='Cadastrado · '+(short?'Conteúdos':'Início');
                         item.row.querySelector('input').disabled=true;
                         item.row.querySelector('button').disabled=true;
-                    }catch(error){item.failed=true;item.status.textContent='Erro: '+(error.message || 'Falha ao publicar este item.');}
+                    }catch(error){
+                        item.failed=true;const reason=String(error.message || 'Falha ao publicar.');
+                        item.status.textContent='Erro: '+reason;
+                        item.repair.querySelector('p').textContent=/quota|limit|limite/i.test(reason) ? 'Limite do YouTube. Aguarde a liberação e publique os pendentes.'
+                            : /autoriza|permiss|popup|conta/i.test(reason) ? 'Confira a conta em Configurações → YouTube e tente novamente.'
+                            : /formato|orientação|metadados/i.test(reason) ? 'Escolha Detectar por arquivo ou selecione um arquivo compatível.'
+                            : item.youtubeId && item.file ? 'O vídeo já foi enviado. Publicar pendentes retoma o cadastro usando o mesmo vídeo.'
+                            : 'Confira a conexão, corrija o arquivo ou o link e clique em Publicar pendentes.';
+                    }
                     refreshBatch();
                 }
                 const count=batchItems.filter(item=>item.done).length;
@@ -1655,7 +1722,7 @@ header .nav-link.active{color:#f1d08c;border-bottom:2px solid #d6b778}
             }catch(error){
                 for(const item of pending.filter(item=>!item.done)){item.failed=true;item.status.textContent='Publicação interrompida: '+error.message;}
                 message.textContent=error.message;
-            }finally{publishingBatch=false;batchElement('fields').disabled=false;refreshBatch();}
+            }finally{publishingBatch=false;batchElement('fields').disabled=false;refreshBatch();scanPublished();}
         };
         window.previewVideo = function(e) {
             const f = e.target.files[0];
@@ -2044,6 +2111,61 @@ header .nav-link.active{color:#f1d08c;border-bottom:2px solid #d6b778}
             if (auth.currentUser) carregarCatalogoRealtime();
             else initAuth();
         };
+        const readScope='https://www.googleapis.com/auth/youtube.readonly';
+        const uploadScope='https://www.googleapis.com/auth/youtube.upload';
+        let auditToken='', auditUntil=0, checking=false, scanAgain=false, auditTimer;
+        function youtubeProblem(video){
+            if(!video)return 'Vídeo removido, privado de outra conta ou indisponível para esta conta.';
+            const status=video.status || {};
+            if(['failed','rejected','deleted'].includes(status.uploadStatus))
+                return 'Envio '+status.uploadStatus+' · '+(status.failureReason || status.rejectionReason || 'indisponível');
+            if(status.privacyStatus==='private')return 'Vídeo privado: o cliente pode não conseguir assistir.';
+            if(status.embeddable===false)return 'O canal desativou a reprodução em outros sites.';
+            return '';
+        }
+        async function scanPublished(authorize=false){
+            const state=document.getElementById('yt-check-state'), button=document.getElementById('yt-scan');
+            if(checking){scanAgain=true;return;}
+            if(!authorize && (!auditToken || Date.now()>=auditUntil))return;
+            checking=true;button.disabled=true;clearTimeout(auditTimer);
+            try{
+                if(authorize){
+                    auditToken=await ensureYoutubeIdentity(readScope);
+                    auditUntil=youtubeSessions.get(youtubeClientId+'|'+preferredAccount+'|'+readScope)?.until || Date.now();
+                }
+                const records=cacheCatalogo.map(item=>({item,id:galleryYoutubeId(item.videoUrl)})).filter(x=>x.id);
+                const ids=[...new Set(records.map(x=>x.id))], found=new Map();
+                state.textContent='Consultando '+ids.length+' vídeos no YouTube…';
+                for(let i=0;i<ids.length;i+=50){
+                    const res=await fetch('https://www.googleapis.com/youtube/v3/videos?part=status&id='+ids.slice(i,i+50).join(','),{headers:{Authorization:'Bearer '+auditToken}});
+                    const body=await res.json();if(!res.ok){if(res.status===401){auditToken='';youtubeSessions.clear();}throw Error(body.error?.message || 'Falha na consulta.');}
+                    for(const video of body.items || [])found.set(video.id,video);
+                }
+                const list=document.createDocumentFragment();let errors=0,processing=0;
+                for(const {item,id} of records){
+                    const video=found.get(id), reason=youtubeProblem(video);
+                    if(!reason){if(video.status.uploadStatus==='uploaded')processing++;continue;}
+                    errors++;const row=document.createElement('article');row.className='catalog-panel';
+                    const title=document.createElement('strong');title.textContent=item.titulo || id;
+                    const detail=document.createElement('p');detail.textContent=reason;row.append(title,detail);
+                    const edit=document.createElement('button');edit.className='workbutton';edit.textContent='Substituir vídeo no catálogo';
+                    edit.onclick=()=>{navigate('ads');document.getElementById('meta-select-video').value=item.id;carregarMetadadosParaEdicao();};row.append(edit);
+                    if(video?.status?.privacyStatus==='private'){
+                        const privacy=document.createElement('button');privacy.className='workbutton';privacy.textContent='Ajustar visibilidade';
+                        privacy.onclick=()=>{navigate('settings');document.getElementById('youtube-settings').open=true;
+                        const input=document.getElementById('managedLink');input.closest('details').open=true;input.value=item.videoUrl;
+                        document.getElementById('managed-privacy').value='private';input.focus();};row.append(privacy);
+                    }
+                    list.append(row);
+                }
+                document.getElementById('yt-issues').replaceChildren(list);
+                document.getElementById('yt-issue-count').textContent=errors;
+                state.textContent=records.length+' cadastros verificados · '+errors+' com pendência · '+processing+' em processamento.';
+                if(processing)auditTimer=setTimeout(()=>scanPublished(),60000);
+            }catch(error){state.textContent='Não foi possível concluir a verificação: '+error.message;}
+            finally{checking=false;button.disabled=false;if(scanAgain){scanAgain=false;scanPublished();}}
+        }
+        document.getElementById('yt-scan').onclick=()=>scanPublished(true);
         window.carregarCatalogoRealtime = function() {
             if (stopCatalog) stopCatalog();
             galleryStatus.textContent = 'Carregando catálogo…';
@@ -2057,6 +2179,7 @@ header .nav-link.active{color:#f1d08c;border-bottom:2px solid #d6b778}
                 }
                 cacheCatalogo = snap.docs.map(entry => ({...entry.data(), id:entry.id})).sort((a,b)=>a.createdAt-b.createdAt);
                 renderGallery();
+                if(!snap.metadata.fromCache && (!snap.metadata.hasPendingWrites) && !publishingBatch && snap.docChanges().length) scanPublished();
                 galleryStatus.textContent = snap.metadata.fromCache
                     ? 'Exibindo a última leitura disponível. Aguardando o servidor…'
                     : cacheCatalogo.length ? 'Publicações no catálogo: ' + cacheCatalogo.length : 'Nenhuma publicação no catálogo.';
