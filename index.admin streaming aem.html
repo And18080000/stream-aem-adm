@@ -425,20 +425,10 @@ body.preview-locked{overflow:hidden}
                                     <input type="file" id="upload-video" accept="video/*" class="hidden" onchange="previewVideo(event)">
                                     <button type="button" onclick="document.getElementById('upload-video').click()" class="w-full bg-[#D6B778] hover:bg-[#e8c989] text-black px-4 py-3 rounded-xl font-bold text-sm shadow-sm transition">Selecionar arquivo de vídeo</button>
                                     <details class="workpanel"><summary>Envio direto ao YouTube</summary><button type="button" class="underline text-sm" onclick="navigate('settings'); document.getElementById('youtube-settings').open=true">Configurar conexão</button><label class="text-[10px] text-brand-text font-bold uppercase">Formato de envio<select id="admin-video-format" class="mt-1 w-full p-2.5 rounded-lg bg-black/40 text-white text-xs border border-white/10"><option value="full">Vídeo normal</option><option value="short">Short vertical</option></select></label><label class="block text-sm">Visibilidade no YouTube<select id="admin-privacy" class="block w-full rounded bg-black p-2"><option value="unlisted">Não listado (apenas com link)</option><option value="public">Público</option><option value="private">Privado</option></select></label>
-                                    <button type="button" id="btn-send-main-youtube" onclick="enviarVideoPrincipalYoutube()" class="w-full bg-red-600 hover:bg-red-500 text-white px-4 py-3 rounded-xl font-bold text-xs shadow-sm transition"><i class="ph ph-youtube-logo mr-1"></i> Enviar vídeo ao YouTube</button>
                                     <p class="text-[10px] text-brand-text">Para Shorts, selecione o formato vertical. A classificação final é feita pelo YouTube após o processamento.</p></details>
                                     <button type="button" onclick="gerarCapaDoVideo()" class="w-full bg-brand-blue hover:bg-brand-blue-hover text-white px-4 py-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition">
                                         <i class="ph ph-camera text-lg"></i> Extrair Capa do Vídeo
                                     </button>
-                                </div>
-                            </div>
-                            <div id="upload-progress-container" class="hidden mt-4 bg-black/20 p-4 rounded-xl border border-white/5 w-full">
-                                <div class="flex justify-between items-center mb-2">
-                                    <span id="upload-status-text" class="text-[10px] text-brand-gold font-black uppercase tracking-widest">Enviando...</span>
-                                    <span id="upload-pct-text" class="text-xs text-white font-mono font-bold">0%</span>
-                                </div>
-                                <div class="w-full h-2 bg-white/10 rounded-full overflow-hidden">
-                                    <div id="upload-progress-bar" class="h-full bg-brand-blue w-0 transition-all duration-300"></div>
                                 </div>
                             </div>
                         </div>
@@ -452,8 +442,12 @@ body.preview-locked{overflow:hidden}
                             </div>
                         </div>
 
+                        <div id="upload-progress-container" class="hidden">
+                            <p role="status"><span id="upload-status-text"></span> <span id="upload-pct-text"></span></p>
+                            <progress id="upload-progress-bar" aria-label="Progresso da etapa atual" max="100" class="w-full"></progress>
+                        </div>
                         <button type="submit" id="btn-salvar-conteudo" class="w-full bg-[#D6B778] hover:bg-[#e8c989] text-black py-4 rounded-xl font-black text-lg transition tracking-wide mt-4 shadow-[0_0_20px_rgba(214,183,120,0.3)]">
-                            SALVAR NO CATÁLOGO
+                            ENVIAR AO YOUTUBE E SALVAR NO CATÁLOGO
                         </button>
                     </form>
                 </div>
@@ -1203,23 +1197,40 @@ body.preview-locked{overflow:hidden}
             return { url: `https://www.youtube.com/watch?v=${result.id}`, id: result.id, isShort: !!isShort };
         }
 
-        window.enviarVideoPrincipalYoutube = async function() {
-            const file = window.selectedVideoFile;
-            if (!file) return window.showToast('Selecione o vídeo principal primeiro.', true);
-            const btn = document.getElementById('btn-send-main-youtube'); btn.disabled = true;
-            const progress = document.getElementById('upload-progress-container'); progress.classList.remove('hidden');
-            document.getElementById('upload-status-text').innerText = 'ENVIANDO DIRETAMENTE AO YOUTUBE...';
-            try {
-                const isShort = document.getElementById('admin-video-format')?.value === 'short';
-                const preview = document.getElementById('admin-form-video-preview');
-                if (!preview.videoWidth || !Number.isFinite(preview.duration)) throw Error('Aguarde a leitura da duração e da orientação do arquivo.');
-                if (videoIsShort(preview.videoWidth,preview.videoHeight,preview.duration) !== (document.getElementById('admin-video-format').value==='short')) throw Error('Escolha o formato compatível com a orientação e a duração do arquivo.');
-                const uploaded = await uploadVideoToYoutube(file, { privacyStatus: document.getElementById('admin-privacy').value, title: document.getElementById('admin-titulo').value || file.name, description: document.getElementById('admin-descricao').value, isShort, onProgress: pct => { document.getElementById('upload-progress-bar').style.width = pct + '%'; document.getElementById('upload-pct-text').innerText = pct + '%'; btn.innerText = `ENVIANDO: ${pct}%`; } });
-                selectedVideoYoutubeUrl = uploaded.url;
-                window.showToast(isShort ? 'Short enviado ao seu YouTube. Salve o conteúdo para vinculá-lo.' : 'Vídeo enviado ao seu YouTube. Salve o conteúdo para vinculá-lo.');
-            } catch (error) { console.error(error); window.showToast(error.message || 'Falha ao enviar para o YouTube.', true); }
-            finally { btn.disabled = false; btn.innerText = 'Enviar vídeo ao YouTube'; }
-        };
+        async function waitForSingleVideo(id, token, ownerUpload, report){
+            const parts=ownerUpload?'status,contentDetails,processingDetails':'status,contentDetails';
+            let delay=5000,firstMissing=0;
+            for(;;){
+                const response=await fetch('https://www.googleapis.com/youtube/v3/videos?part='+parts+'&id='+encodeURIComponent(id),{
+                    headers:{Authorization:'Bearer '+token},cache:'no-store'
+                });
+                const body=await response.json();
+                if(!response.ok)throw uploadError(response.status,body);
+                const video=body.items?.[0], details=video?.processingDetails;
+                const uploaded=video?.status?.uploadStatus;
+                if(video){
+                    firstMissing=0;
+                    if(details?.processingStatus==='failed' || details?.processingStatus==='terminated')
+                        throw Error('Processamento encerrado pelo YouTube: '+(details.processingFailureReason || details.processingStatus));
+                    if(uploaded!=='uploaded' || ['private'].includes(video.status.privacyStatus) || video.status.embeddable===false){
+                        const reason=youtubeProblem(video);
+                        if(reason)throw Error(reason);
+                        if(details?.processingStatus!=='processing')return {id,ready:true,reason:''};
+                    }
+                }else{
+                    if(!firstMissing)firstMissing=Date.now();
+                    if(!ownerUpload || Date.now()-firstMissing>180000)throw Error('O YouTube ainda não localizou o vídeo nesta conta.');
+                }
+                const progress=details?.processingProgress;
+                const total=Number(progress?.partsTotal), done=Number(progress?.partsProcessed);
+                const pct=total>0 && Number.isFinite(done) ? Math.min(100,Math.max(0,Math.floor(100*done/total))) : null;
+                report(video?'Processando no YouTube…':'Aguardando o registro do vídeo no YouTube…',pct);
+                await new Promise(resolve=>setTimeout(resolve,delay));
+                delay=Math.min(60000,delay*1.5);
+            }
+        }
+        let singleCatalogRef=null;
+
 
         // ADMIN FUNÇÕES (BRANDING E CATÁLOGO PRINCIPAL)
         window.previewAppLogo = function(e) {
@@ -1804,7 +1815,7 @@ body.preview-locked{overflow:hidden}
             singlePanel.classList.remove('is-dragging');
             if(!hasFiles(event) || event.target.closest('input[type=file]'))return;
             event.preventDefault();
-            if(document.getElementById('form-conteudo').inert || document.getElementById('btn-send-main-youtube').disabled)return;
+            if(document.getElementById('form-conteudo').inert || document.getElementById('btn-salvar-conteudo').disabled)return;
             const files=event.dataTransfer.files;
             if(files.length!==1){dropHint.textContent='Para vários arquivos, use Publicação em massa.';return;}
             const file=files[0];
@@ -1856,7 +1867,7 @@ body.preview-locked{overflow:hidden}
             if (!currentUser) return showToast("Autenticando...", true);
             
             const coverImgEl = document.getElementById('preview-capa-img');
-            if (coverImgEl.classList.contains('hidden') && !editandoId && !selectedVideoYoutubeUrl) return showToast("Selecione uma capa.", true);
+            if (coverImgEl.classList.contains('hidden') && !editandoId && !selectedVideoYoutubeUrl && !window.selectedVideoFile) return showToast("Selecione uma capa.", true);
 
             const btn = document.getElementById('btn-salvar-conteudo');
             const progressContainer = document.getElementById('upload-progress-container');
@@ -1864,6 +1875,15 @@ body.preview-locked{overflow:hidden}
             const progressText = document.getElementById('upload-pct-text');
             const statusText = document.getElementById('upload-status-text');
 
+            if(btn.disabled)return;
+            function report(label,percent=null){
+                progressContainer.classList.remove('hidden');
+                statusText.textContent=label;
+                progressBar.hidden=false;
+                progressText.textContent=percent===null?'':percent+'%';
+                if(percent===null)progressBar.removeAttribute('value');
+                else progressBar.value=percent;
+            }
             btn.innerText = "PREPARANDO..."; btn.disabled = true;
             document.getElementById('form-conteudo').inert=true;
             document.getElementById('individual-new').disabled=true;
@@ -1872,17 +1892,39 @@ body.preview-locked{overflow:hidden}
             let finalVideoUrl = selectedVideoYoutubeUrl || null;
 
             try {
+                const file=window.selectedVideoFile, videoId=galleryYoutubeId(finalVideoUrl);
+                let confirmation=null;
+                if(file || videoId){
+                    const scope=file ? uploadScope+' '+readScope : readScope;
+                    const token=await ensureYoutubeIdentity(scope);
+                    if(file && !finalVideoUrl){
+                        const preview=document.getElementById('admin-form-video-preview');
+                        if(!preview.videoWidth || !Number.isFinite(preview.duration))throw Error('Aguarde a leitura do arquivo e tente novamente.');
+                        const isShort=document.getElementById('admin-video-format').value==='short';
+                        if(videoIsShort(preview.videoWidth,preview.videoHeight,preview.duration)!==isShort)
+                            throw Error('Confira o formato, a orientação e a duração do vídeo.');
+                        const prefix=youtubeClientId+'|'+preferredAccount+'|';
+                        youtubeSessions.set(prefix+uploadScope,youtubeSessions.get(prefix+scope));
+                        report('Enviando ao YouTube…',0);
+                        const uploaded=await uploadVideoToYoutube(file,{title:document.getElementById('admin-titulo').value || file.name,
+                            description:document.getElementById('admin-descricao').value,isShort,privacyStatus:document.getElementById('admin-privacy').value,
+                            onProgress:pct=>report('Enviando ao YouTube…',pct)});
+                        selectedVideoYoutubeUrl=finalVideoUrl=uploaded.url;
+                    }
+                    report('Verificando processamento no YouTube…');
+                    confirmation=await waitForSingleVideo(galleryYoutubeId(finalVideoUrl),token,!!file,report);
+                }
                 if (window.selectedCoverFile) {
-                    statusText.innerText = "SUBINDO CAPA...";
+                    report("Salvando capa…");
                     progressContainer.classList.remove('hidden');
                     const ext = window.selectedCoverFile.name.split('.').pop();
                     const fileName = `capas/${Date.now()}_img.${ext}`;
                     await getStorage().putObject({ Bucket: "aem", Key: fileName, Body: window.selectedCoverFile, ContentType: window.selectedCoverFile.type }).promise();
                     finalCapaUrl = `https://pub-a62c7f1bfc0248cab53121a7a3f99245.r2.dev/${fileName}`;
-                    progressBar.style.width = '20%'; progressText.innerText = '20%';
+
                 }
 
-                if (window.selectedVideoFile && !selectedVideoYoutubeUrl) throw new Error('Envie o vídeo ao YouTube antes de salvar o conteúdo.');
+                report('Salvando no catálogo…');
 
                 const selectedMenus = Array.from(document.querySelectorAll('input[name="admin-menu-vinc"]:checked')).map(cb => cb.value);
                 if (selectedMenus.length === 0) selectedMenus.push('home');
@@ -1899,7 +1941,7 @@ body.preview-locked{overflow:hidden}
                 };
 
                 if (finalCapaUrl) payload.capaUrl = finalCapaUrl;
-                if(galleryYoutubeId(finalVideoUrl))payload.youtubeCheck=await verifyVideo(galleryYoutubeId(finalVideoUrl));
+                if(confirmation)payload.youtubeCheck=confirmation;
                 if (finalVideoUrl) { payload.videoUrl = finalVideoUrl; payload.isShort = document.getElementById('admin-video-format')?.value === 'short'; }
 
                 if((!editandoId || mainTrailers.changed) && document.getElementById('admin-video-format').value==='full')
@@ -1913,23 +1955,26 @@ body.preview-locked{overflow:hidden}
                     if (!payload.capaUrl) payload.capaUrl = coverImgEl.classList.contains('hidden') && finalVideoUrl
                         ? 'https://i.ytimg.com/vi/'+galleryYoutubeId(finalVideoUrl)+'/hqdefault.jpg' : coverImgEl.src;
                     if (!payload.videoUrl) payload.videoUrl = "";
-                    await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'catalog'), payload);
+                    singleCatalogRef ??= doc(collection(db,'artifacts',appId,'public','data','catalog'));
+                    await setDoc(singleCatalogRef,payload);
                     showToast("Conteúdo cadastrado com sucesso!");
                 }
                 
                 limparFormularioAdmin();
             } catch (err) {
                 console.error(err);
+                report((err.message || 'Falha ao salvar.')+(window.selectedVideoFile && selectedVideoYoutubeUrl?' O arquivo já foi enviado. Você pode retomar nesta página.':''));
+                progressBar.hidden=true;
                 showToast(err.message || "Erro ao salvar o conteúdo.", true);
             } finally {
-                btn.innerText = "SALVAR NO CATÁLOGO"; btn.disabled = false;
+                btn.innerText = window.selectedVideoFile && selectedVideoYoutubeUrl ? 'Retomar publicação' : editandoId ? 'Atualizar conteúdo' : 'Enviar ao YouTube e salvar no catálogo'; btn.disabled = false;
                 document.getElementById('form-conteudo').inert=false;
                 document.getElementById('individual-new').disabled=false;
             }
         }
 
         window.limparFormularioAdmin = function() {
-            editandoId = null;
+            editandoId = null;singleCatalogRef=null;
             mainTrailers.reset();
             dropHint.textContent='Arraste um vídeo para este painel ou selecione o arquivo abaixo.';
             document.getElementById('form-conteudo').reset();syncTrailerVisibility();
@@ -1943,8 +1988,8 @@ body.preview-locked{overflow:hidden}
             document.getElementById('preview-video-icon').classList.replace('ph-check-circle', 'ph-play');
             document.getElementById('preview-video-icon').classList.remove('text-green-400');
             document.getElementById('upload-progress-container').classList.add('hidden');
-            document.getElementById('upload-progress-bar').style.width = '0%';
-            document.getElementById('btn-salvar-conteudo').innerText = "SALVAR NO CATÁLOGO";
+            document.getElementById('upload-progress-bar').removeAttribute('value');
+            document.getElementById('btn-salvar-conteudo').innerText = "ENVIAR AO YOUTUBE E SALVAR NO CATÁLOGO";
         }
 
         window.carregarParaEdicao = function(id) {
