@@ -470,7 +470,7 @@ body.preview-locked{overflow:hidden}
 
         
         <section id="view-published" class="hidden mx-auto px-4 md:px-8">
-            <details id="yt-review" class="workpanel" open><summary>Pendências do YouTube (<span id="yt-issue-count">—</span>)</summary>
+            <details id="yt-review" class="workpanel" open><summary>Avisos do YouTube (<span id="yt-issue-count">—</span>)</summary>
             <button type="button" class="workbutton" id="yt-scan">Verificar vídeos do catálogo</button>
             <p role="status" id="yt-check-state">Verifique o catálogo para liberar vídeos antigos. Itens pendentes ficam fora do site do cliente.</p>
             <div id="yt-issues" class="grid gap-2"></div></details>
@@ -670,7 +670,7 @@ body.preview-locked{overflow:hidden}
                         <div class="flex flex-col flex-grow w-full">
                             <label class="block text-brand-gold text-xs font-bold uppercase tracking-widest border-b border-white/10 pb-3 mb-4 w-full">Anúncios Ativos no Sistema</label>
                             <div id="ads-videos-list" class="space-y-4 max-h-[450px] overflow-y-auto pr-2 admin-scroll w-full">
-                                <p class="text-xs text-brand-text italic mt-2">Nenhum anúncio exclusivo cadastrado. O sistema usará trailers do catálogo.</p>
+                                <p class="text-xs text-brand-text italic mt-2">Nenhum anúncio cadastrado. O portfólio seguirá sem propagandas próprias.</p>
                             </div>
                         </div>
                     </div>
@@ -1103,7 +1103,7 @@ body.preview-locked{overflow:hidden}
                 const token = await ensureYoutubeIdentity('https://www.googleapis.com/auth/youtube.force-ssl');
                 const endpoint = 'https://www.googleapis.com/youtube/v3/videos';
                 const headers = {Authorization:'Bearer '+token};
-                const response = await fetch(endpoint+'?part=status,processingDetails&id='+encodeURIComponent(id),{headers});
+                const response = await fetch(endpoint+'?part=status,contentDetails,processingDetails&id='+encodeURIComponent(id),{headers});
                 const data = await response.json();
                 const item = data.items?.[0];
                 if (!item) throw Error(data.error?.message || 'Vídeo indisponível para esta conta.');
@@ -1118,7 +1118,7 @@ body.preview-locked{overflow:hidden}
                     item.status = saved.status;
                 }
                 document.getElementById('managed-privacy').value = item.status.privacyStatus;
-                output.textContent = 'Visibilidade: '+document.getElementById('managed-privacy').selectedOptions[0].text+'. Processamento: '+(item.processingDetails?.processingStatus || item.status.uploadStatus);
+                output.textContent = 'Visibilidade: '+document.getElementById('managed-privacy').selectedOptions[0].text+'. Processamento: '+(item.processingDetails?.processingStatus || item.status.uploadStatus)+'. '+youtubeAvailability(id,item).reason;
             } catch(error){ output.textContent = error.message; }
         }
         document.getElementById('checkVideo').onclick = () => manageVideo(false);
@@ -1207,19 +1207,13 @@ body.preview-locked{overflow:hidden}
                 const body=await response.json();
                 if(!response.ok)throw uploadError(response.status,body);
                 const video=body.items?.[0], details=video?.processingDetails;
-                const uploaded=video?.status?.uploadStatus;
                 if(video){
                     firstMissing=0;
-                    if(details?.processingStatus==='failed' || details?.processingStatus==='terminated')
-                        throw Error('Processamento encerrado pelo YouTube: '+(details.processingFailureReason || details.processingStatus));
-                    if(uploaded!=='uploaded' || ['private'].includes(video.status.privacyStatus) || video.status.embeddable===false){
-                        const reason=youtubeProblem(video);
-                        if(reason)throw Error(reason);
-                        if(details?.processingStatus!=='processing')return {id,ready:true,reason:''};
-                    }
+                    const check=youtubeAvailability(id,video);
+                    if(check.kind!=='processing')return check;
                 }else{
                     if(!firstMissing)firstMissing=Date.now();
-                    if(!ownerUpload || Date.now()-firstMissing>180000)throw Error('O YouTube ainda não localizou o vídeo nesta conta.');
+                    if(!ownerUpload || Date.now()-firstMissing>180000)return youtubeAvailability(id,null);
                 }
                 const progress=details?.processingProgress;
                 const total=Number(progress?.partsTotal), done=Number(progress?.partsProcessed);
@@ -1751,7 +1745,10 @@ body.preview-locked{overflow:hidden}
                             if(format!=='auto' && (format==='short')!==short)throw Error('Formato incompatível com o arquivo. Confira a orientação e a duração ou use a detecção automática.');
                         }else{
                             youtubeCheck=await verifyVideo(item.youtubeId);
-                            await fetchLinkedTitle(item);
+                            try{await fetchLinkedTitle(item);}catch(e){
+                                if(youtubeCheck.ready)throw e;
+                                item.title ||= 'Vídeo '+item.youtubeId;
+                            }
                             if(format!=='auto')short=format==='short';
                         }
                         stage('Preparando capa…');
@@ -1766,7 +1763,7 @@ body.preview-locked{overflow:hidden}
                             item.youtubeId=uploaded.id;
                         }
                         stage('Confirmando disponibilidade no YouTube…');
-                        youtubeCheck ||= await verifyVideo(item.youtubeId);
+                        youtubeCheck ||= await waitForSingleVideo(item.youtubeId,auditToken,!!item.file,stage);
                         const trailers=short ? {} : await item.trailerEditor.save(item.title,privacyStatus,stage);
                         item.progress=99;stage('Salvando no catálogo…');refreshBatch();
                         const now=Date.now(), id=item.youtubeId;
@@ -1777,7 +1774,7 @@ body.preview-locked{overflow:hidden}
                             descricao:'',ownerId:currentUser.uid,createdAt:now,updatedAt:now});
                         item.done=true;
                         item.row.querySelector('.meta-folder fieldset').disabled=true;
-                        item.status.textContent='Cadastrado · '+(short?'Conteúdos':'Início');
+                        item.status.textContent='Cadastrado · '+availabilityLabel(youtubeCheck);
                         item.row.querySelector('input').disabled=true;
                         item.row.querySelector('button').disabled=true;
                     }catch(error){
@@ -1948,7 +1945,7 @@ body.preview-locked{overflow:hidden}
                     Object.assign(payload,await mainTrailers.save(payload.titulo,document.getElementById('admin-privacy').value));
                 if (editandoId) {
                     await saveReplacement(editandoId,payload);
-                    showToast("Conteúdo atualizado no Firebase!");
+                    showToast(confirmation ? "Cadastro salvo · "+availabilityLabel(confirmation) : "Conteúdo atualizado no Firebase!");
                 } else {
                     payload.ownerId = currentUser.uid;
                     payload.createdAt = new Date().getTime();
@@ -1957,7 +1954,7 @@ body.preview-locked{overflow:hidden}
                     if (!payload.videoUrl) payload.videoUrl = "";
                     singleCatalogRef ??= doc(collection(db,'artifacts',appId,'public','data','catalog'));
                     await setDoc(singleCatalogRef,payload);
-                    showToast("Conteúdo cadastrado com sucesso!");
+                    showToast(confirmation ? "Cadastro salvo · "+availabilityLabel(confirmation) : "Conteúdo cadastrado com sucesso!");
                 }
                 
                 limparFormularioAdmin();
@@ -2161,6 +2158,13 @@ body.preview-locked{overflow:hidden}
                     const tag=document.createElement('p'); tag.className='text-xs text-brand-text'; tag.textContent=catalogVideoStatus(item);tag.textContent += ' · '+formatOf(item); card.append(tag);
                     const actions=document.createElement('div');actions.className='flex flex-wrap gap-2 mt-2';card.append(actions);
                     function action(label,fn){const btn=document.createElement('button');btn.textContent=label;btn.className='underline text-sm p-1';btn.onclick=fn;actions.append(btn);}
+                    const youtubeId=galleryYoutubeId(item.videoUrl || item.trailerUrl);
+                    if(youtubeId){
+                        if(item.youtubeCheck?.id===youtubeId && item.youtubeCheck.reason){
+                            const detail=document.createElement('p');detail.className='text-xs break-words';detail.textContent=item.youtubeCheck.reason;card.append(detail);
+                        }
+                        videoDecisionActions(item,youtubeId,action);
+                    }
                     if(item.videoUrl) action('Assistir',()=>{renderAdminVideoPreview(galleryDialog.querySelector('video'),item.videoUrl);galleryDialog.showModal();});
                     action('Editar',()=>{navigate('ads');const select=document.getElementById('meta-select-video');select.value=item.id;carregarMetadadosParaEdicao();select.scrollIntoView({block:'start'});});
                     action('Excluir',async()=>{try{await excluirConteudo(item.id);}catch(e){showToast(e.message,true);}});
@@ -2226,6 +2230,7 @@ body.preview-locked{overflow:hidden}
             const old=await runTransaction(db,async tx=>{
                 const snap=await tx.get(ref);
                 if(!snap.exists())throw Error('O conteúdo já não existe.');
+                if(payload.videoUrl && galleryYoutubeId(payload.videoUrl)!==galleryYoutubeId(snap.data().videoUrl))payload.youtubeDecision=null;
                 tx.update(ref,payload);return snap.data();
             });
             if(payload.videoUrl && galleryYoutubeId(old.videoUrl) && galleryYoutubeId(old.videoUrl)!==galleryYoutubeId(payload.videoUrl))
@@ -2262,21 +2267,56 @@ body.preview-locked{overflow:hidden}
                 input.value='';status.textContent='Foto salva para '+category+'.';
             }catch(e){status.textContent='Falha ao salvar: '+e.message;}finally{this.disabled=false;}
         };
-        function youtubeProblem(video){
-            if(!video)return 'Vídeo removido ou indisponível para a conta conectada.';
-            const status=video.status || {}, region=video.contentDetails?.regionRestriction;
-            const why=status.rejectionReason || status.failureReason;
-            if(['failed','rejected','deleted'].includes(status.uploadStatus)){
-                const reasons={copyright:'Direitos autorais',claim:'Reivindicação de direitos',duplicate:'Vídeo duplicado',codec:'Codec incompatível',conversion:'Falha na conversão',invalidFile:'Arquivo inválido',termsOfUse:'Termos de uso'};
-                return (reasons[why] || why || status.uploadStatus)+'. Substitua o vídeo por uma versão autorizada e compatível.';
+        function youtubeAvailability(id,video){
+            const status=video?.status || {}, details=video?.contentDetails || {};
+            const result=(kind,ready,reason)=>({id,kind,ready,reason});
+            if(!video)return result('unknown',false,'Vídeo indisponível para a conta conectada.');
+            if(['failed','rejected','deleted'].includes(status.uploadStatus) ||
+               ['failed','terminated'].includes(video.processingDetails?.processingStatus)){
+                const reason=status.rejectionReason || status.failureReason || video.processingDetails?.processingFailureReason || status.uploadStatus;
+                return result('unavailable',false,'Envio indisponível no YouTube ('+reason+').');
             }
-            if(status.privacyStatus==='private')return 'Vídeo privado. Ajuste a visibilidade antes de publicar.';
-            if(status.embeddable===false)return 'Reprodução em outros sites bloqueada pelo YouTube.';
-            if(region?.blocked?.includes('BR') || (region?.allowed && !region.allowed.includes('BR')))return 'YouTube bloqueia a reprodução no Brasil.';
-            if(video.contentDetails?.contentRating?.ytRating==='ytAgeRestricted')return 'Restrição de idade no player incorporado.';
-            if(status.uploadStatus!=='processed')return 'Processamento ainda não confirmado. Aguarde e verifique novamente.';
-            if(!['public','unlisted'].includes(status.privacyStatus) || status.embeddable!==true)return 'Disponibilidade não confirmada pelo YouTube.';
-            return '';
+            const region=details.regionRestriction || {};
+            // A API também pode enumerar os países bloqueados em vez de enviar allowed vazio.
+            const globalBlock=region.blocked?.length>=249 &&
+                'AD AE AF AG AI AL AM AO AQ AR AS AT AU AW AX AZ BA BB BD BE BF BG BH BI BJ BL BM BN BO BQ BR BS BT BV BW BY BZ CA CC CD CF CG CH CI CK CL CM CN CO CR CU CV CW CX CY CZ DE DJ DK DM DO DZ EC EE EG EH ER ES ET FI FJ FK FM FO FR GA GB GD GE GF GG GH GI GL GM GN GP GQ GR GS GT GU GW GY HK HM HN HR HT HU ID IE IL IM IN IO IQ IR IS IT JE JM JO JP KE KG KH KI KM KN KP KR KW KY KZ LA LB LC LI LK LR LS LT LU LV LY MA MC MD ME MF MG MH MK ML MM MN MO MP MQ MR MS MT MU MV MW MX MY MZ NA NC NE NF NG NI NL NO NP NR NU NZ OM PA PE PF PG PH PK PL PM PN PR PS PT PW PY QA RE RO RS RU RW SA SB SC SD SE SG SH SI SJ SK SL SM SN SO SR SS ST SV SX SY SZ TC TD TF TG TH TJ TK TL TM TN TO TR TT TV TW TZ UA UG UM US UY UZ VA VC VE VG VI VN VU WF WS YE YT ZA ZM ZW'.split(' ').every(code=>region.blocked.includes(code));
+            if(globalBlock || region.allowed?.length===0)return result('blocked',false,'Bloqueado em todos os países pelo YouTube.');
+            if(status.privacyStatus==='private')return result('private',false,'Vídeo privado no YouTube.');
+            if(status.embeddable===false)return result('embed',false,'O YouTube desativou a reprodução em outros sites.');
+            if(details.contentRating?.ytRating==='ytAgeRestricted')return result('age',false,'Restrição de idade. O YouTube pode exigir login para assistir.');
+            if(status.uploadStatus==='uploaded' || video.processingDetails?.processingStatus==='processing')
+                return result('processing',false,'Processando no YouTube.');
+            if(status.uploadStatus!=='processed' || !['public','unlisted'].includes(status.privacyStatus) || status.embeddable!==true)
+                return result('unknown',false,'Disponibilidade ainda não confirmada.');
+            if(region.allowed?.length || region.blocked?.length){
+                const info=region.allowed?.length ? 'Disponível somente em '+region.allowed.join(', ') : 'Bloqueado em '+region.blocked.join(', ');
+                return result('partial',true,'Bloqueio parcial. '+info+'.');
+            }
+            return result('available',true,'Reprodução permitida pela API do YouTube.');
+        }
+        function availabilityLabel(check){
+            return ({partial:'Parcialmente bloqueado',blocked:'Totalmente bloqueado',available:'Liberado',
+                embed:'Incorporação bloqueada',age:'Restrição de idade',private:'Privado',
+                processing:'Processando',unknown:'A verificar',unavailable:'Indisponível'})[check.kind] ||
+                (check.ready?'Verificado':'Indisponível');
+        }
+        function videoDecisionActions(item,id,action){
+            action('Detalhes no YouTube Studio',()=>window.open('https://studio.youtube.com/video/'+encodeURIComponent(id)+'/copyright','_blank','noopener'));
+            const check=item.youtubeCheck;
+            if(check?.id!==id || (item.youtubeDecision?.id!==id && !['blocked','embed','partial','age','private','unavailable'].includes(check.kind)))return;
+            const visible=item.youtubeDecision?.id===id ? item.youtubeDecision.visible : check.ready;
+            action(visible?'Ocultar no portfólio':'Liberar no portfólio',async()=>{
+                if(!visible && !check.ready && !confirm('Exibir este título no catálogo? A reprodução continua sujeita às permissões do YouTube.'))return;
+                try{
+                    const ref=doc(db,'artifacts',appId,'public','data','catalog',item.id);
+                    await runTransaction(db,async tx=>{
+                        const current=(await tx.get(ref)).data();
+                        if(!current || galleryYoutubeId(current.videoUrl || current.trailerUrl)!==id)throw Error('O vídeo foi alterado. Confira o cadastro atual.');
+                        tx.update(ref,{youtubeDecision:{id,visible:!visible}});
+                    });
+                    showToast(visible?'Título ocultado.':'Título liberado no portfólio.');
+                }catch(e){showToast(e.message,true);}
+            });
         }
         async function lookupVideos(ids,token){
             const res=await fetch('https://www.googleapis.com/youtube/v3/videos?part=status,contentDetails&id='+ids.join(','),{headers:{Authorization:'Bearer '+token}});
@@ -2287,16 +2327,15 @@ body.preview-locked{overflow:hidden}
         async function verifyVideo(id){
             const token=await ensureYoutubeIdentity(readScope);
             const [video]=await lookupVideos([id],token);
-            const reason=youtubeProblem(video);
-            if(reason)throw Error(reason);
-            return {id,ready:true,reason:''};
+            return youtubeAvailability(id,video);
         }
         function catalogVideoStatus(item){
             const id=galleryYoutubeId(item.videoUrl || item.trailerUrl);
             if (!id) return item.videoUrl ? 'Arquivo vinculado' : 'Sem vídeo principal';
             const check = item.youtubeCheck;
             if (check?.id !== id || typeof check.ready !== 'boolean') return 'YouTube · A verificar';
-            return check.ready ? 'YouTube · Verificado' : 'YouTube · Indisponível';
+            const visible=item.youtubeDecision?.id===id ? item.youtubeDecision.visible : check.ready;
+            return 'YouTube · '+availabilityLabel(check)+' · '+(visible?'Visível no portfólio':'Oculto no portfólio');
         }
         function openVideoSettings(url){
             navigate('settings');document.getElementById('youtube-settings').open=true;
@@ -2321,20 +2360,22 @@ body.preview-locked{overflow:hidden}
                 }
                 const list=document.createDocumentFragment();let errors=0,processing=0;
                 for(const {item,id} of records){
-                    const video=found.get(id), reason=youtubeProblem(video);
-                    const check={id,ready:!reason,reason};
-                    if(item.youtubeCheck?.id!==id || item.youtubeCheck.ready!==check.ready || item.youtubeCheck.reason!==reason){
+                    const video=found.get(id), check=youtubeAvailability(id,video), reason=check.reason;
+                    if(item.youtubeCheck?.id!==id || item.youtubeCheck.ready!==check.ready || item.youtubeCheck.reason!==reason || item.youtubeCheck.kind!==check.kind){
                         const ref=doc(db,'artifacts',appId,'public','data','catalog',item.id);
                         await runTransaction(db,async tx=>{
                             const now=(await tx.get(ref)).data();
                             if(now && galleryYoutubeId(now.videoUrl || now.trailerUrl)===id)tx.update(ref,{youtubeCheck:check});
                         });
                     }
-                    if(!reason)continue;
+                    if(check.ready && check.kind!=='partial')continue;
                     if(video?.status?.uploadStatus==='uploaded')processing++;
                     errors++;const row=document.createElement('article');row.className='catalog-panel';
                     const title=document.createElement('strong');title.textContent=item.titulo || id;
                     const detail=document.createElement('p');detail.textContent=reason;row.append(title,detail);
+                    const addAction=(label,fn)=>{const button=document.createElement('button');button.className='workbutton';button.textContent=label;button.onclick=fn;row.append(button);};
+                    videoDecisionActions({...item,youtubeCheck:check},id,addAction);
+                    addAction('Excluir do catálogo',()=>window.excluirConteudo(item.id).catch(e=>showToast(e.message,true)));
                     const edit=document.createElement('button');edit.className='workbutton';edit.textContent='Substituir vídeo no catálogo';
                     edit.onclick=()=>{navigate('ads');document.getElementById('meta-select-video').value=item.id;carregarMetadadosParaEdicao();};row.append(edit);
                     if(video?.status?.privacyStatus==='private'){
@@ -2345,7 +2386,7 @@ body.preview-locked{overflow:hidden}
                 }
                 document.getElementById('yt-issues').replaceChildren(list);
                 document.getElementById('yt-issue-count').textContent=errors;
-                state.textContent=records.length+' cadastros verificados · '+errors+' com pendência · '+processing+' em processamento.';
+                state.textContent=records.length+' cadastros verificados · '+errors+' com aviso · '+processing+' em processamento.';
                 if(processing)auditTimer=setTimeout(()=>scanPublished(),60000);
             }catch(error){state.textContent='Não foi possível concluir a verificação: '+error.message;}
             finally{checking=false;button.disabled=false;if(scanAgain){scanAgain=false;scanPublished();}}
@@ -2672,7 +2713,7 @@ body.preview-locked{overflow:hidden}
                 // Executa a atualização do documento existente
                 await saveReplacement(id,payload);
                 
-                showToast("Metadados, Vídeo e Trailer atualizados com sucesso!");
+                showToast(payload.youtubeCheck ? "Cadastro atualizado · "+availabilityLabel(payload.youtubeCheck) : "Metadados, Vídeo e Trailer atualizados com sucesso!");
                 
                 // Reseta estados locais de arquivos após sucesso
                 selectedMetaCoverFile = null;
@@ -2700,15 +2741,10 @@ body.preview-locked{overflow:hidden}
         // 2. Configuração e Upload de Anúncios (Com Ordem, Duração e Agendamento)
         window.carregarConfigAnunciosRealtime = function() {
             onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'configuracoes', 'anuncios'), (snap) => {
-                if(snap.exists()) {
-                    const d = snap.data();
-                    document.getElementById('ads-frequencia').value = d.frequencia || 3;
-                    
-                    if(d.videos && Array.isArray(d.videos)) {
-                        cacheAnunciosVideos = d.videos;
-                        renderListaDeAnuncios();
-                    }
-                }
+                const config = snap.data() || {};
+                document.getElementById('ads-frequencia').value = config.frequencia || 3;
+                cacheAnunciosVideos = Array.isArray(config.videos) ? config.videos : [];
+                renderListaDeAnuncios();
             });
         };
 
@@ -2778,7 +2814,7 @@ body.preview-locked{overflow:hidden}
         function renderListaDeAnuncios() {
             const container = document.getElementById('ads-videos-list');
             if(cacheAnunciosVideos.length === 0) {
-                container.innerHTML = `<p class="text-xs text-brand-text italic mt-2">Nenhum anúncio exclusivo cadastrado. O sistema usará trailers do catálogo.</p>`;
+                container.innerHTML = `<p class="text-xs text-brand-text italic mt-2">Nenhum anúncio cadastrado. O portfólio seguirá sem propagandas próprias.</p>`;
                 return;
             }
             
