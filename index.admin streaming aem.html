@@ -2011,7 +2011,6 @@ body.batch-grid #catalog-workspace{display:block}body.batch-grid #preview-panel{
             const groups = new Map();
             for(const name of Object.keys(rooms)) groups.set(name,[]);
             for(const item of cacheCatalogo){
-                if(!approvedItem(item))continue;
                 for(const category of itemCategories(item)){
                     if(!groups.has(category)) groups.set(category,[]);
                     groups.get(category).push(item);
@@ -2037,7 +2036,7 @@ body.batch-grid #catalog-workspace{display:block}body.batch-grid #preview-panel{
                     const img=document.createElement('img'); img.loading='lazy'; img.alt=item.titulo || 'Capa'; if(item.capaUrl) img.src=item.capaUrl;
                     img.className=formatOf(item)==='Vertical'?'w-full aspect-[2/3] object-cover rounded':'w-full aspect-video object-cover rounded'; card.append(img);
                     const title=document.createElement('h3'); title.className='font-bold break-words py-2'; title.textContent=item.titulo; card.append(title);
-                    const tag=document.createElement('p'); tag.className='text-xs text-brand-text'; tag.textContent=galleryYoutubeId(item.videoUrl)?'YouTube':item.videoUrl?'Arquivo vinculado':'Sem vídeo';tag.textContent += ' · '+formatOf(item); card.append(tag);
+                    const tag=document.createElement('p'); tag.className='text-xs text-brand-text'; tag.textContent=catalogVideoStatus(item);tag.textContent += ' · '+formatOf(item); card.append(tag);
                     const actions=document.createElement('div');actions.className='flex flex-wrap gap-2 mt-2';card.append(actions);
                     function action(label,fn){const btn=document.createElement('button');btn.textContent=label;btn.className='underline text-sm p-1';btn.onclick=fn;actions.append(btn);}
                     if(item.videoUrl) action('Assistir',()=>{renderAdminVideoPreview(galleryDialog.querySelector('video'),item.videoUrl);galleryDialog.showModal();});
@@ -2170,9 +2169,12 @@ body.batch-grid #catalog-workspace{display:block}body.batch-grid #preview-panel{
             if(reason)throw Error(reason);
             return {id,ready:true,reason:''};
         }
-        function approvedItem(item){
+        function catalogVideoStatus(item){
             const id=galleryYoutubeId(item.videoUrl || item.trailerUrl);
-            return !id || (item.youtubeCheck?.id===id && item.youtubeCheck.ready===true);
+            if (!id) return item.videoUrl ? 'Arquivo vinculado' : 'Sem vídeo principal';
+            const check = item.youtubeCheck;
+            if (check?.id !== id || typeof check.ready !== 'boolean') return 'YouTube · A verificar';
+            return check.ready ? 'YouTube · Verificado' : 'YouTube · Indisponível';
         }
         function openVideoSettings(url){
             navigate('settings');document.getElementById('youtube-settings').open=true;
@@ -2253,7 +2255,6 @@ body.batch-grid #catalog-workspace{display:block}body.batch-grid #preview-panel{
                     status.textContent = 'Aguardando confirmação do catálogo…';
                 } else {
                     const count = snap.docs.filter(entry => {
-                        if(!approvedItem(entry.data()))return false;
                         const url = entry.get('videoUrl');
                         return typeof url === 'string' && url.trim() !== '';
                     }).length;
@@ -2277,10 +2278,11 @@ body.batch-grid #catalog-workspace{display:block}body.batch-grid #preview-panel{
 
                     let badgeHTML = '<span class="text-xs text-brand-gold">'+menuName(item)+'</span>';
                     
-                    if(approvedItem(item)) adm += `<article class="published-row">
+                    adm += `<article class="published-row">
                         <button type="button" class="published-edit" onclick="carregarParaEdicao('${item.id}')">
                             <img alt="" loading="lazy" src="${catalogText(item.capaUrl)}">
                             <strong>${catalogText(item.titulo)}</strong>${badgeHTML}
+                            <small>${catalogText(catalogVideoStatus(item))}</small>
                             <span class="edit-caption">Editar</span>
                         </button>
                         <button type="button" aria-label="Excluir ${catalogText(item.titulo)}" onclick="excluirConteudo('${item.id}')"><i class="ph ph-trash"></i></button>
