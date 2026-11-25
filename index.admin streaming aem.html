@@ -984,11 +984,22 @@ body.batch-grid #catalog-workspace{display:block}body.batch-grid #preview-panel{
         });
     </script>
     <!-- SCRIPTS -->
-    <script type="module" onerror="document.getElementById('admin-service-status').textContent='Falha ao carregar os serviços do painel. Verifique a conexão e recarregue a página.'">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, runTransaction, collection, addDoc, onSnapshot, deleteDoc, doc, setDoc, getDoc, getDocs, updateDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
-
+    <script type="module">
+    try {
+        const services=['app','auth','firestore'];
+        const modulesAt=base=>Promise.all(services.map(name=>import(base(name))));
+        let modules, timer;
+        try {
+            modules=await Promise.race([
+                modulesAt(name=>'https://www.gstatic.com/firebasejs/11.6.1/firebase-'+name+'.js'),
+                new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('Tempo de conexão excedido')),10000);})
+            ]);
+        } catch {
+            modules=await modulesAt(name=>'https://esm.sh/firebase@11.6.1/'+name);
+        } finally {clearTimeout(timer);}
+        const { initializeApp }=modules[0];
+        const { getAuth, signInAnonymously, onAuthStateChanged }=modules[1];
+        const { getFirestore, runTransaction, collection, addDoc, onSnapshot, deleteDoc, doc, setDoc, getDoc, getDocs, updateDoc }=modules[2];
         // CREDENCIAIS DA A&M
         const firebaseConfig = {
             apiKey: "AIzaSyC9mGKW38Dh8xIIphde_V41dit52CRctgo",
@@ -1296,17 +1307,13 @@ body.batch-grid #catalog-workspace{display:block}body.batch-grid #preview-panel{
         }
 
         window.carregarOrdemELogosCategorias = function() {
-            onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'configuracoes', 'ordemCategorias'), (snap) => {
-                if(snap.exists()) { window.cacheOrdemCategorias = snap.data(); }
-                getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'configuracoes', 'logosCategorias')).then(snapLogos => {
-                    if(snapLogos.exists()) { window.cacheLogosCategorias = snapLogos.data(); }
-                    getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'configuracoes', 'ocultarTextoCategorias')).then(snapOcultar => {
-                        if(snapOcultar.exists()) { window.cacheOcultarCategorias = snapOcultar.data(); }
-                        renderListaOrdem(Array.from(new Set(cacheCatalogo.flatMap(itemCategories))));
-                    });
-                });
-            });
-        }
+            for(const [key,cache] of [['ordemCategorias','cacheOrdemCategorias'],['logosCategorias','cacheLogosCategorias'],['ocultarTextoCategorias','cacheOcultarCategorias']]){
+                onSnapshot(configDoc(key),snap=>{
+                    window[cache]=snap.data() || {};
+                    renderListaOrdem(cacheCatalogo.flatMap(itemCategories));
+                },error=>console.warn('Categorias ('+key+'):',error.code));
+            }
+        };
 
         window.moveCategory=(button,dir)=>{
             const row=button.closest('.category-item-drag'), sibling=dir<0?row.previousElementSibling:row.nextElementSibling;
@@ -1315,7 +1322,7 @@ body.batch-grid #catalog-workspace{display:block}body.batch-grid #preview-panel{
             [...row.parentElement.querySelectorAll('.input-ordem-cat')].forEach((el,i)=>el.value=i+1);
         };
         function renderListaOrdem(categoriasArray) {
-            categoriasArray=[...new Set([...categoriasArray,...Object.keys(rooms),...cacheCatalogo.flatMap(itemCategories)])];
+            categoriasArray=[...new Set([...categoriasArray,...Object.keys(window.cacheOrdemCategorias),...Object.keys(window.cacheLogosCategorias),...Object.keys(rooms),...cacheCatalogo.flatMap(itemCategories)])];
             const container = document.getElementById('admin-ordem-categorias-list');
             if (container) {
                 // Ordena o array com base no cache antes do render
@@ -2229,32 +2236,54 @@ body.batch-grid #catalog-workspace{display:block}body.batch-grid #preview-panel{
             finally{checking=false;button.disabled=false;if(scanAgain){scanAgain=false;scanPublished();}}
         }
         document.getElementById('yt-scan').onclick=()=>scanPublished(true);
+        function decodeFields(fields={}){
+            return Object.fromEntries(Object.entries(fields).map(([key,field])=>[key,decodeValue(field)]));
+        }
+        function decodeValue(field){
+            if(field.mapValue)return decodeFields(field.mapValue.fields);
+            if(field.arrayValue)return (field.arrayValue.values || []).map(decodeValue);
+            if('nullValue' in field)return null;
+            if('integerValue' in field)return Number(field.integerValue);
+            if('timestampValue' in field)return Date.parse(field.timestampValue);
+            return Object.values(field)[0];
+        }
         window.carregarCatalogoRealtime = function() {
             if (stopCatalog) stopCatalog();
             galleryStatus.textContent = 'Carregando catálogo…';
             galleryRetry.hidden = true;
             const total = document.getElementById('projects-count');
             const status = document.getElementById('projects-status');
-            stopCatalog = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'catalog'), {includeMetadataChanges:true}, (snap) => {
-                if (snap.metadata.fromCache && snap.empty) {
-                    galleryStatus.textContent = 'Aguardando conexão com o catálogo…';
-                    return;
-                }
-                cacheCatalogo = snap.docs.map(entry => ({...entry.data(), id:entry.id})).sort((a,b)=>a.createdAt-b.createdAt);
+            const catalogRef=collection(db,'artifacts',appId,'public','data','catalog');
+            let active=true, serverLoaded=false, rendered=false, fallbackTimer, unsubscribe=()=>{};
+            const controller=new AbortController();
+            function showError(error){
+                if(!active)return;
+                galleryRetry.hidden=false;
+                const msg='Falha ao carregar o catálogo: '+(error.code || error.message);
+                galleryStatus.textContent=msg;
+                document.getElementById('admin-service-status').textContent=msg;
+                if(!rendered){document.getElementById('admin-lista-conteudo').textContent=msg;total.textContent='—';status.textContent=msg;}
+            }
+            function display(snapshot,changed){
+                if(!active)return;
+                rendered=true;
+                galleryRetry.hidden=true;
+                document.getElementById('admin-service-status').textContent='';
+                cacheCatalogo = snapshot.docs.map(entry => ({...entry.data(), id:entry.id})).sort((a,b)=>a.createdAt-b.createdAt);
                 const selectedCategory=categorySelect.value;
                 const categories=[...new Set(cacheCatalogo.filter(item=>item.isShort || item.menuId==='menu2' || item.menuIds?.includes?.('menu2') || /^conte[uú]dos$/i.test(item.trilho)).flatMap(itemCategories))].sort();
                 categorySelect.replaceChildren(...categories.map(c=>new Option(c,c)));
                 if(categories.includes(selectedCategory))categorySelect.value=selectedCategory;
                 renderGallery();
-                if(!snap.metadata.fromCache && (!snap.metadata.hasPendingWrites) && !publishingBatch && snap.docChanges().length) scanPublished();
-                galleryStatus.textContent = snap.metadata.fromCache
+                if(!snapshot.metadata.fromCache && (!snapshot.metadata.hasPendingWrites) && !publishingBatch && changed) scanPublished();
+                galleryStatus.textContent = snapshot.metadata.fromCache
                     ? 'Exibindo a última leitura disponível. Aguardando o servidor…'
                     : cacheCatalogo.length ? 'Publicações no catálogo: ' + cacheCatalogo.length : 'Nenhuma publicação no catálogo.';
-                if (snap.metadata.fromCache || snap.metadata.hasPendingWrites) {
+                if (snapshot.metadata.fromCache || snapshot.metadata.hasPendingWrites) {
                     total.textContent = '—';
                     status.textContent = 'Aguardando confirmação do catálogo…';
                 } else {
-                    const count = snap.docs.filter(entry => {
+                    const count = snapshot.docs.filter(entry => {
                         const url = entry.get('videoUrl');
                         return typeof url === 'string' && url.trim() !== '';
                     }).length;
@@ -2310,13 +2339,43 @@ body.batch-grid #catalog-workspace{display:block}body.batch-grid #preview-panel{
                 if(!selector.value)document.getElementById('form-metadados').classList.add('hidden');
                 
                 renderListaOrdem(Array.from(categoriasExistem));
-            }, error => {
-                total.textContent = '—';
-                galleryStatus.textContent = 'Falha ao consultar as publicações: ' + error.message;
-                galleryRetry.hidden = false;
-                status.textContent = 'Não foi possível consultar a quantidade de projetos.';
-                document.getElementById('admin-lista-conteudo').textContent = 'Falha ao carregar o catálogo: ' + error.message;
-                document.getElementById('admin-service-status').textContent = 'Falha ao consultar o catálogo no Firebase.';
+
+            }
+            let reading=false;
+            async function readBackup(){
+                if(!active || serverLoaded || reading)return;
+                reading=true;
+                const deadline=setTimeout(()=>controller.abort(),25000);
+                try{
+                    const token=await auth.currentUser.getIdToken();
+                    const base='https://firestore.googleapis.com/v1/projects/'+encodeURIComponent(firebaseConfig.projectId)+'/databases/(default)/documents/'+catalogRef.path;
+                    const docs=[];let page='';
+                    do{
+                        const url=new URL(base);url.searchParams.set('pageSize','300');
+                        if(page)url.searchParams.set('pageToken',page);
+                        const response=await fetch(url,{headers:{Authorization:'Bearer '+token},signal:controller.signal,cache:'no-store'});
+                        const result=await response.json();
+                        if(!response.ok)throw Error(result.error?.message || String(response.status));
+                        for(const record of result.documents || []){
+                            const data=decodeFields(record.fields);
+                            docs.push({id:record.name.split('/').pop(),data:()=>data,get:key=>data[key]});
+                        }
+                        page=result.nextPageToken || '';
+                    }while(page && active && !serverLoaded);
+                    if(active && !serverLoaded){display({docs,metadata:{fromCache:false,hasPendingWrites:false}},false);galleryStatus.textContent+=' · Leitura direta do servidor';galleryRetry.textContent='Atualizar catálogo';galleryRetry.hidden=false;}
+                }catch(error){if(active && !serverLoaded)showError(error);}
+                finally {clearTimeout(deadline);reading=false;}
+            }
+            stopCatalog=()=>{active=false;clearTimeout(fallbackTimer);controller.abort();unsubscribe();};
+            fallbackTimer=setTimeout(readBackup,8000);
+            unsubscribe=onSnapshot(catalogRef,{includeMetadataChanges:true},snap=>{
+                if(!active || (snap.metadata.fromCache && (snap.empty || rendered)))return;
+                if(!snap.metadata.fromCache){serverLoaded=true;clearTimeout(fallbackTimer);controller.abort();}
+                try{display(snap,snap.docChanges().length>0);}catch(error){showError(error);}
+            },error=>{
+                if(!active)return;
+                clearTimeout(fallbackTimer);showError(error);
+                if(!serverLoaded)readBackup();
             });
         }
 
@@ -2850,3 +2909,77 @@ body.batch-grid #catalog-workspace{display:block}body.batch-grid #preview-panel{
                 showToast("Erro ao alterar permissões.", true);
             }
         };
+
+        window.excluirUsuario = async function(userId, phoneStr) {
+            if(!confirm("Tem a certeza que deseja remover este cliente permanentemente?")) return;
+            try {
+                await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'user_registrations', userId));
+                if (phoneStr) {
+                    const phoneId = phoneStr.replace(/\D/g, '');
+                    if (phoneId) {
+                        await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'leads', phoneId));
+                    }
+                }
+                showToast("Cliente removido com sucesso.");
+            } catch(e) {
+                showToast("Erro ao remover cliente.", true);
+            }
+        };
+
+        // ==========================================
+        // ABA 3: BANCO DE DADOS CLOUD R2
+        // ==========================================
+        document.getElementById('cleanVideos').onclick = async function(){
+            const report = document.getElementById('cleanReport');
+            this.disabled = true;
+            let removed = 0;
+            try {
+                const refs = new Set();
+                const add = value => {
+                    try { const u = new URL(value); if(u.hostname === 'pub-a62c7f1bfc0248cab53121a7a3f99245.r2.dev') refs.add(decodeURIComponent(u.pathname.slice(1))); } catch {}
+                };
+                const catalog = await getDocs(collection(db,'artifacts',appId,'public','data','catalog'));
+                const ads = await getDoc(doc(db,'artifacts',appId,'public','data','configuracoes','anuncios'));
+                for(const d of catalog.docs){const v=d.data(); add(v.videoUrl); add(v.trailerUrl); (v.trailers || []).forEach(t => add(t.url));}
+                (ads.data()?.videos || []).forEach(v => add(v.url));
+                const files = (await listR2()).filter(f => refs.has(f.Key) && /\.(mp4|webm|mov|mkv|avi|m4v|mpeg|mpg|m2ts|mts|wmv)$/i.test(f.Key) && !/^(capas|branding)\//i.test(f.Key));
+                if(files.length && !confirm('Excluir permanentemente '+files.length+' vídeos do R2? Os links antigos deixarão de reproduzir.')) return;
+                for(const f of files){ await getStorage().deleteObject({Bucket:'aem',Key:f.Key}).promise(); report.textContent = ++removed+' de '+files.length+' excluídos.'; }
+                report.textContent = removed+' arquivos de vídeo excluídos.';
+                await carregarArquivosR2();
+            } catch(e){ report.textContent = removed+' excluídos. Falha: '+e.message; }
+            finally { this.disabled=false; }
+        };
+        window.addEventListener('admin-view', e => {
+            if (e.detail === 'leads') renderLeadDirectory();
+
+        });
+        onAuthStateChanged(auth, (user) => {
+            currentUser = user;
+            if (!user) { initAuth(); return; }
+            if (user) {
+                document.getElementById('admin-service-status').textContent='';
+                carregarCatalogoRealtime();
+                carregarBrandingRealtime();
+                carregarOrdemELogosCategorias();
+                carregarUsuariosRealtime();
+                carregarConfigAnunciosRealtime();
+                carregarIntegracaoYoutube();
+                onSnapshot(configDoc('salas'),snap=>{rooms=Object.assign(Object.create(null),snap.data());renderGallery();renderListaOrdem(cacheCatalogo.flatMap(itemCategories));});
+                onSnapshot(maintenanceRef,snap => {
+                    maintenanceEnabled = snap.data()?.active === true;
+                    paintSwitch(); maintenanceSwitch.disabled = false;
+                }, () => maintenanceSwitch.textContent = 'Falha ao consultar disponibilidade');
+            }
+        });
+
+    } catch (error) {
+        console.error('Inicialização do administrador:',error);
+        const msg='Falha ao iniciar os serviços do painel: '+(error.code || error.message);
+        for(const id of ['admin-service-status','gallery-status','admin-lista-conteudo'])
+            document.getElementById(id).textContent=msg;
+        const retry=document.getElementById('gallery-retry');retry.hidden=false;retry.onclick=()=>location.reload();
+    }
+</script>
+<dialog id="deleteYoutubeDialog" class="m-auto rounded-xl bg-brand-panel text-white p-5 max-w-md"><form method="dialog"><h2 class="font-bold">Excluir permanentemente do YouTube?</h2><p id="deleteYoutubeInfo" class="my-3"></p><output id="deleteYoutubeStatus" aria-live="polite"></output><div class="flex gap-4 mt-4"><button value="cancel">Fechar</button><button type="button" id="deleteYoutubeConfirm" class="bg-red-700 rounded px-3 py-2">Autorizar exclusão</button></div></form></dialog></body>
+</html>
