@@ -242,6 +242,10 @@ body.batch-grid #catalog-workspace{display:block}body.batch-grid #preview-panel{
                     <p id="projects-status" class="text-sm text-brand-text">Consultando o catálogo…</p>
                 </div>
             </section>
+            <section class="catalog-panel mb-6"><h2 class="text-lg font-bold">Foto do perfil de Conteúdos</h2>
+<label>Categoria<select id="profile-category" class="block w-full p-2 bg-black"></select></label>
+<label>Foto do perfil<input type="file" id="category-photo" accept="image/*" class="block my-2"></label>
+<button type="button" id="save-category-photo" class="workbutton">Salvar foto do perfil</button><p role="status" id="category-photo-status"></p></section>
             <!-- Identidade Visual do App -->
             <div class="bg-brand-panel border border-brand-gold/30 rounded-2xl p-4 md:p-6 mb-6 md:mb-8 shadow-lg flex flex-col lg:flex-row gap-6">
                 <div class="flex-grow">
@@ -461,7 +465,7 @@ body.batch-grid #catalog-workspace{display:block}body.batch-grid #preview-panel{
         <section id="view-published" class="hidden mx-auto px-4 md:px-8">
             <details id="yt-review" class="workpanel" open><summary>Pendências do YouTube (<span id="yt-issue-count">—</span>)</summary>
             <button type="button" class="workbutton" id="yt-scan">Verificar vídeos do catálogo</button>
-            <p role="status" id="yt-check-state">Autorize a consulta ao canal para verificar os vídeos.</p>
+            <p role="status" id="yt-check-state">Verifique o catálogo para liberar vídeos antigos. Itens pendentes ficam fora do site do cliente.</p>
             <div id="yt-issues" class="grid gap-2"></div></details>
             <div class="catalog-panel"><div class="panel-head"><span class="panel-symbol" aria-hidden="true">▤</span><h2>Conteúdos publicados</h2></div>
             <div id="admin-lista-conteudo" class="grid gap-2">Carregando catálogo…</div></div>
@@ -1437,7 +1441,7 @@ body.batch-grid #catalog-workspace{display:block}body.batch-grid #preview-panel{
                 const dest = batchElement(item.failed ? 'failed-list' : 'list');
                 if (item.row.parentElement !== dest) dest.append(item.row);
                 item.row.classList.toggle('batch-issue', !!item.failed);
-                item.repair.hidden = !item.failed;
+                item.repair.hidden = !item.failed;item.manage.hidden=!item.youtubeId;
                 item.meter.value = item.done ? 100 : item.progress || 0;
             }
             batchElement('finish').hidden = !published || publishingBatch;
@@ -1554,7 +1558,7 @@ body.batch-grid #catalog-workspace{display:block}body.batch-grid #preview-panel{
                 const url=item.repair.querySelector('[type=url]').value.trim(), id=galleryYoutubeId(url);
                 if(!id){status.textContent='Informe um link válido do YouTube.';return;}
                 if(item.preview){URL.revokeObjectURL(item.preview);item.preview=null;}
-                file=item.file=null;item.youtubeId=id;item.linkedShort=linkedShort=new URL(url).pathname.startsWith('/shorts/');
+                file=item.file=null;item.youtubeId=id;item.linkedShort=linkedShort=new URL(url,location.href).pathname.includes('/shorts/');
                 media.pause();media.removeAttribute('src');media.load();media.hidden=capture.hidden=true;
                 poster.src=item.coverPreview || 'https://i.ytimg.com/vi/'+id+'/hqdefault.jpg';poster.hidden=false;
                 item.title='';row.querySelector('strong').textContent=id;item.syncTrailers();status.textContent='Link atualizado. Clique em Publicar pendentes.';
@@ -1568,7 +1572,9 @@ body.batch-grid #catalog-workspace{display:block}body.batch-grid #preview-panel{
             };
             const retry=document.createElement('button');retry.type='button';retry.className='workbutton';
             retry.textContent='Tentar novamente este vídeo';retry.onclick=()=>publishBatch(item);
-            item.repair.append(retry);
+            const manage=document.createElement('button');manage.type='button';manage.className='workbutton';manage.textContent='Gerenciar visibilidade no YouTube';
+            manage.onclick=()=>{if(!item.youtubeId)return;openVideoSettings('https://www.youtube.com/watch?v='+item.youtubeId);};
+            item.manage=manage;item.repair.append(manage,retry);
             row.append(item.repair);
             batchItems.push(item);
             batchElement('message').textContent='';
@@ -1634,7 +1640,7 @@ body.batch-grid #catalog-workspace{display:block}body.batch-grid #preview-panel{
             const links=batchElement('links'), invalid=[];
             for(const url of links.value.trim().split(/\s+/).filter(Boolean)){
                 const id=galleryYoutubeId(url);
-                if(id)addBatchItem(null,id,new URL(url).pathname.startsWith('/shorts/'));
+                if(id)addBatchItem(null,id,new URL(url,location.href).pathname.includes('/shorts/'));
                 else invalid.push(url);
             }
             links.value=invalid.join('\n');
@@ -1657,28 +1663,30 @@ body.batch-grid #catalog-workspace{display:block}body.batch-grid #preview-panel{
             refreshBatch();
             try {
                 let authError;
-                if(pending.some(item=>item.file && !item.youtubeId)) {
+                {
                     try {
-                        const combined=uploadScope+' '+readScope;
+                        const needsUpload=pending.some(item=>item.file && !item.youtubeId);
+                        const combined=needsUpload ? uploadScope+' '+readScope : readScope;
                         auditToken=await ensureYoutubeIdentity(combined);
                         const prefix=youtubeClientId+'|'+preferredAccount+'|';
                         const grant=youtubeSessions.get(prefix+combined);
-                        auditUntil=grant.until;youtubeSessions.set(prefix+uploadScope,grant);youtubeSessions.set(prefix+readScope,grant);
+                        auditUntil=grant.until;if(needsUpload)youtubeSessions.set(prefix+uploadScope,grant);youtubeSessions.set(prefix+readScope,grant);
                     } catch(error){authError=error;}
                 }
                 for(const item of pending){
                     try {
-                        if(authError && item.file && !item.youtubeId) throw authError;
+                        if(authError) throw authError;
                         const label = item.title || item.youtubeId;
                         const stage = text => {item.status.textContent=text;batchElement('stage').textContent=label+' · '+text;};
                         stage('Verificando vídeo…');
                         const media=item.media;
-                        let short=item.linkedShort;
+                        let short=item.linkedShort, youtubeCheck;
                         if(item.file){
                             if(!media.videoWidth || !media.videoHeight || !Number.isFinite(media.duration) || media.duration<=0)throw Error('Aguarde os metadados ou selecione um arquivo compatível.');
                             short=videoIsShort(media.videoWidth,media.videoHeight,media.duration);
                             if(format!=='auto' && (format==='short')!==short)throw Error('Formato incompatível com o arquivo. Confira a orientação e a duração ou use a detecção automática.');
                         }else{
+                            youtubeCheck=await verifyVideo(item.youtubeId);
                             await fetchLinkedTitle(item);
                             if(format!=='auto')short=format==='short';
                         }
@@ -1693,10 +1701,12 @@ body.batch-grid #catalog-workspace{display:block}body.batch-grid #preview-panel{
                             const uploaded=await uploadVideoToYoutube(item.file,{title:item.title,isShort:short,privacyStatus,onProgress:p=>{item.progress=Math.min(99,p);stage('Envio ao YouTube · '+p+'%');refreshBatch();}});
                             item.youtubeId=uploaded.id;
                         }
+                        stage('Confirmando disponibilidade no YouTube…');
+                        youtubeCheck ||= await verifyVideo(item.youtubeId);
                         const trailers=short ? {} : await item.trailerEditor.save(item.title,privacyStatus,stage);
                         item.progress=99;stage('Salvando no catálogo…');refreshBatch();
                         const now=Date.now(), id=item.youtubeId;
-                        await setDoc(item.ref,{...trailers,titulo:item.title,trilho,subtitulo,selo,orientacao:0,isShort:short,
+                        await setDoc(item.ref,{...trailers,youtubeCheck,titulo:item.title,trilho,subtitulo,selo,orientacao:0,isShort:short,
                             galleryFormat:(item.file ? media.videoHeight>=media.videoWidth : short)?'Vertical':'Horizontal',
                             menuIds:[short?'menu2':'home'],videoUrl:'https://www.youtube.com/watch?v='+id,
                             capaUrl:item.coverUrl || 'https://i.ytimg.com/vi/'+id+'/hqdefault.jpg',
@@ -1810,6 +1820,7 @@ body.batch-grid #catalog-workspace{display:block}body.batch-grid #preview-panel{
                 };
 
                 if (finalCapaUrl) payload.capaUrl = finalCapaUrl;
+                if(galleryYoutubeId(finalVideoUrl))payload.youtubeCheck=await verifyVideo(galleryYoutubeId(finalVideoUrl));
                 if (finalVideoUrl) { payload.videoUrl = finalVideoUrl; payload.isShort = document.getElementById('admin-video-format')?.value === 'short'; }
 
                 if((!editandoId || mainTrailers.changed) && document.getElementById('admin-video-format').value==='full')
@@ -1910,11 +1921,13 @@ body.batch-grid #catalog-workspace{display:block}body.batch-grid #preview-panel{
         }
         function galleryYoutubeId(link){
             try {
-                const u = new URL(link);
+                const value=String(link || '').trim();
+                if(/^[\w-]{11}$/.test(value))return value;
+                const u = new URL(/^(?:www\.|m\.)?(?:youtube\.com|youtu\.be)\//i.test(value)?'https://'+value:value);
                 let id = '';
                 if(u.hostname === 'youtu.be') id = u.pathname.slice(1);
-                else if(['youtube.com','www.youtube.com','m.youtube.com','www.youtube-nocookie.com'].includes(u.hostname))
-                    id = u.searchParams.get('v') || u.pathname.match(/^\/(?:shorts|embed|live)\/([^/]+)/)?.[1];
+                else if(['youtube.com','www.youtube.com','m.youtube.com','www.youtube-nocookie.com','youtube-nocookie.com'].includes(u.hostname))
+                    id = u.searchParams.get('v') || u.pathname.match(/^\/(?:shorts|embed|live|v)\/([^/]+)/)?.[1];
                 return /^[\w-]{11}$/.test(id || '') ? id : '';
             } catch { return ''; }
         }
@@ -1998,6 +2011,7 @@ body.batch-grid #catalog-workspace{display:block}body.batch-grid #preview-panel{
             const groups = new Map();
             for(const name of Object.keys(rooms)) groups.set(name,[]);
             for(const item of cacheCatalogo){
+                if(!approvedItem(item))continue;
                 for(const category of itemCategories(item)){
                     if(!groups.has(category)) groups.set(category,[]);
                     groups.get(category).push(item);
@@ -2114,14 +2128,56 @@ body.batch-grid #catalog-workspace{display:block}body.batch-grid #preview-panel{
         const readScope='https://www.googleapis.com/auth/youtube.readonly';
         const uploadScope='https://www.googleapis.com/auth/youtube.upload';
         let auditToken='', auditUntil=0, checking=false, scanAgain=false, auditTimer;
+        const categorySelect=document.getElementById('profile-category');
+        document.getElementById('save-category-photo').onclick=async function(){
+            const status=document.getElementById('category-photo-status');
+            const input=document.getElementById('category-photo'), file=input.files[0], category=categorySelect.value;
+            if(!category || !file?.type.startsWith('image/')){status.textContent='Escolha uma categoria e uma imagem.';return;}
+            this.disabled=true;
+            try{
+                const key='branding/perfis/'+crypto.randomUUID();
+                await getStorage().putObject({Bucket:'aem',Key:key,Body:file,ContentType:file.type}).promise();
+                await setDoc(configDoc('fotosPerfisConteudos'),{[category.normalize('NFC').trim().toLocaleLowerCase('pt-BR')]:r2PublicOrigin+'/'+key},{merge:true});
+                input.value='';status.textContent='Foto salva para '+category+'.';
+            }catch(e){status.textContent='Falha ao salvar: '+e.message;}finally{this.disabled=false;}
+        };
         function youtubeProblem(video){
-            if(!video)return 'Vídeo removido, privado de outra conta ou indisponível para esta conta.';
-            const status=video.status || {};
-            if(['failed','rejected','deleted'].includes(status.uploadStatus))
-                return 'Envio '+status.uploadStatus+' · '+(status.failureReason || status.rejectionReason || 'indisponível');
-            if(status.privacyStatus==='private')return 'Vídeo privado: o cliente pode não conseguir assistir.';
-            if(status.embeddable===false)return 'O canal desativou a reprodução em outros sites.';
+            if(!video)return 'Vídeo removido ou indisponível para a conta conectada.';
+            const status=video.status || {}, region=video.contentDetails?.regionRestriction;
+            const why=status.rejectionReason || status.failureReason;
+            if(['failed','rejected','deleted'].includes(status.uploadStatus)){
+                const reasons={copyright:'Direitos autorais',claim:'Reivindicação de direitos',duplicate:'Vídeo duplicado',codec:'Codec incompatível',conversion:'Falha na conversão',invalidFile:'Arquivo inválido',termsOfUse:'Termos de uso'};
+                return (reasons[why] || why || status.uploadStatus)+'. Substitua o vídeo por uma versão autorizada e compatível.';
+            }
+            if(status.privacyStatus==='private')return 'Vídeo privado. Ajuste a visibilidade antes de publicar.';
+            if(status.embeddable===false)return 'Reprodução em outros sites bloqueada pelo YouTube.';
+            if(region?.blocked?.includes('BR') || (region?.allowed && !region.allowed.includes('BR')))return 'YouTube bloqueia a reprodução no Brasil.';
+            if(video.contentDetails?.contentRating?.ytRating==='ytAgeRestricted')return 'Restrição de idade no player incorporado.';
+            if(status.uploadStatus!=='processed')return 'Processamento ainda não confirmado. Aguarde e verifique novamente.';
+            if(!['public','unlisted'].includes(status.privacyStatus) || status.embeddable!==true)return 'Disponibilidade não confirmada pelo YouTube.';
             return '';
+        }
+        async function lookupVideos(ids,token){
+            const res=await fetch('https://www.googleapis.com/youtube/v3/videos?part=status,contentDetails&id='+ids.join(','),{headers:{Authorization:'Bearer '+token}});
+            const body=await res.json();
+            if(!res.ok){if(res.status===401){youtubeSessions.clear();auditToken='';}throw Error(body.error?.message || 'Consulta ao YouTube indisponível. Tente novamente.');}
+            return body.items || [];
+        }
+        async function verifyVideo(id){
+            const token=await ensureYoutubeIdentity(readScope);
+            const [video]=await lookupVideos([id],token);
+            const reason=youtubeProblem(video);
+            if(reason)throw Error(reason);
+            return {id,ready:true,reason:''};
+        }
+        function approvedItem(item){
+            const id=galleryYoutubeId(item.videoUrl || item.trailerUrl);
+            return !id || (item.youtubeCheck?.id===id && item.youtubeCheck.ready===true);
+        }
+        function openVideoSettings(url){
+            navigate('settings');document.getElementById('youtube-settings').open=true;
+            const input=document.getElementById('managedLink');input.closest('details').open=true;
+            input.value=url;document.getElementById('managed-privacy').value='private';input.focus();
         }
         async function scanPublished(authorize=false){
             const state=document.getElementById('yt-check-state'), button=document.getElementById('yt-scan');
@@ -2133,18 +2189,25 @@ body.batch-grid #catalog-workspace{display:block}body.batch-grid #preview-panel{
                     auditToken=await ensureYoutubeIdentity(readScope);
                     auditUntil=youtubeSessions.get(youtubeClientId+'|'+preferredAccount+'|'+readScope)?.until || Date.now();
                 }
-                const records=cacheCatalogo.map(item=>({item,id:galleryYoutubeId(item.videoUrl)})).filter(x=>x.id);
+                const records=cacheCatalogo.map(item=>({item,id:galleryYoutubeId(item.videoUrl || item.trailerUrl)})).filter(x=>x.id);
                 const ids=[...new Set(records.map(x=>x.id))], found=new Map();
                 state.textContent='Consultando '+ids.length+' vídeos no YouTube…';
                 for(let i=0;i<ids.length;i+=50){
-                    const res=await fetch('https://www.googleapis.com/youtube/v3/videos?part=status&id='+ids.slice(i,i+50).join(','),{headers:{Authorization:'Bearer '+auditToken}});
-                    const body=await res.json();if(!res.ok){if(res.status===401){auditToken='';youtubeSessions.clear();}throw Error(body.error?.message || 'Falha na consulta.');}
-                    for(const video of body.items || [])found.set(video.id,video);
+                    for(const video of await lookupVideos(ids.slice(i,i+50),auditToken))found.set(video.id,video);
                 }
                 const list=document.createDocumentFragment();let errors=0,processing=0;
                 for(const {item,id} of records){
                     const video=found.get(id), reason=youtubeProblem(video);
-                    if(!reason){if(video.status.uploadStatus==='uploaded')processing++;continue;}
+                    const check={id,ready:!reason,reason};
+                    if(item.youtubeCheck?.id!==id || item.youtubeCheck.ready!==check.ready || item.youtubeCheck.reason!==reason){
+                        const ref=doc(db,'artifacts',appId,'public','data','catalog',item.id);
+                        await runTransaction(db,async tx=>{
+                            const now=(await tx.get(ref)).data();
+                            if(now && galleryYoutubeId(now.videoUrl || now.trailerUrl)===id)tx.update(ref,{youtubeCheck:check});
+                        });
+                    }
+                    if(!reason)continue;
+                    if(video?.status?.uploadStatus==='uploaded')processing++;
                     errors++;const row=document.createElement('article');row.className='catalog-panel';
                     const title=document.createElement('strong');title.textContent=item.titulo || id;
                     const detail=document.createElement('p');detail.textContent=reason;row.append(title,detail);
@@ -2152,9 +2215,7 @@ body.batch-grid #catalog-workspace{display:block}body.batch-grid #preview-panel{
                     edit.onclick=()=>{navigate('ads');document.getElementById('meta-select-video').value=item.id;carregarMetadadosParaEdicao();};row.append(edit);
                     if(video?.status?.privacyStatus==='private'){
                         const privacy=document.createElement('button');privacy.className='workbutton';privacy.textContent='Ajustar visibilidade';
-                        privacy.onclick=()=>{navigate('settings');document.getElementById('youtube-settings').open=true;
-                        const input=document.getElementById('managedLink');input.closest('details').open=true;input.value=item.videoUrl;
-                        document.getElementById('managed-privacy').value='private';input.focus();};row.append(privacy);
+                        privacy.onclick=()=>openVideoSettings(item.videoUrl);row.append(privacy);
                     }
                     list.append(row);
                 }
@@ -2178,6 +2239,10 @@ body.batch-grid #catalog-workspace{display:block}body.batch-grid #preview-panel{
                     return;
                 }
                 cacheCatalogo = snap.docs.map(entry => ({...entry.data(), id:entry.id})).sort((a,b)=>a.createdAt-b.createdAt);
+                const selectedCategory=categorySelect.value;
+                const categories=[...new Set(cacheCatalogo.filter(item=>item.isShort || item.menuId==='menu2' || item.menuIds?.includes?.('menu2') || /^conte[uú]dos$/i.test(item.trilho)).flatMap(itemCategories))].sort();
+                categorySelect.replaceChildren(...categories.map(c=>new Option(c,c)));
+                if(categories.includes(selectedCategory))categorySelect.value=selectedCategory;
                 renderGallery();
                 if(!snap.metadata.fromCache && (!snap.metadata.hasPendingWrites) && !publishingBatch && snap.docChanges().length) scanPublished();
                 galleryStatus.textContent = snap.metadata.fromCache
@@ -2188,6 +2253,7 @@ body.batch-grid #catalog-workspace{display:block}body.batch-grid #preview-panel{
                     status.textContent = 'Aguardando confirmação do catálogo…';
                 } else {
                     const count = snap.docs.filter(entry => {
+                        if(!approvedItem(entry.data()))return false;
                         const url = entry.get('videoUrl');
                         return typeof url === 'string' && url.trim() !== '';
                     }).length;
@@ -2211,7 +2277,7 @@ body.batch-grid #catalog-workspace{display:block}body.batch-grid #preview-panel{
 
                     let badgeHTML = '<span class="text-xs text-brand-gold">'+menuName(item)+'</span>';
                     
-                    adm += `<article class="published-row">
+                    if(approvedItem(item)) adm += `<article class="published-row">
                         <button type="button" class="published-edit" onclick="carregarParaEdicao('${item.id}')">
                             <img alt="" loading="lazy" src="${catalogText(item.capaUrl)}">
                             <strong>${catalogText(item.titulo)}</strong>${badgeHTML}
@@ -2421,6 +2487,7 @@ body.batch-grid #catalog-workspace{display:block}body.batch-grid #preview-panel{
                 };
                 
                 if(finalCoverUrl) payload.capaUrl = finalCoverUrl;
+                if(galleryYoutubeId(finalVideoUrl))payload.youtubeCheck=await verifyVideo(galleryYoutubeId(finalVideoUrl));
                 if(finalVideoUrl) payload.videoUrl = finalVideoUrl;
                 if(finalVideoUrl && selectedMetaVideoFile) payload.isShort = document.getElementById('meta-video-format').value === 'short';
 
@@ -2781,70 +2848,3 @@ body.batch-grid #catalog-workspace{display:block}body.batch-grid #preview-panel{
                 showToast("Erro ao alterar permissões.", true);
             }
         };
-
-        window.excluirUsuario = async function(userId, phoneStr) {
-            if(!confirm("Tem a certeza que deseja remover este cliente permanentemente?")) return;
-            try {
-                await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'user_registrations', userId));
-                if (phoneStr) {
-                    const phoneId = phoneStr.replace(/\D/g, '');
-                    if (phoneId) {
-                        await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'leads', phoneId));
-                    }
-                }
-                showToast("Cliente removido com sucesso.");
-            } catch(e) {
-                showToast("Erro ao remover cliente.", true);
-            }
-        };
-
-        // ==========================================
-        // ABA 3: BANCO DE DADOS CLOUD R2
-        // ==========================================
-        document.getElementById('cleanVideos').onclick = async function(){
-            const report = document.getElementById('cleanReport');
-            this.disabled = true;
-            let removed = 0;
-            try {
-                const refs = new Set();
-                const add = value => {
-                    try { const u = new URL(value); if(u.hostname === 'pub-a62c7f1bfc0248cab53121a7a3f99245.r2.dev') refs.add(decodeURIComponent(u.pathname.slice(1))); } catch {}
-                };
-                const catalog = await getDocs(collection(db,'artifacts',appId,'public','data','catalog'));
-                const ads = await getDoc(doc(db,'artifacts',appId,'public','data','configuracoes','anuncios'));
-                for(const d of catalog.docs){const v=d.data(); add(v.videoUrl); add(v.trailerUrl); (v.trailers || []).forEach(t => add(t.url));}
-                (ads.data()?.videos || []).forEach(v => add(v.url));
-                const files = (await listR2()).filter(f => refs.has(f.Key) && /\.(mp4|webm|mov|mkv|avi|m4v|mpeg|mpg|m2ts|mts|wmv)$/i.test(f.Key) && !/^(capas|branding)\//i.test(f.Key));
-                if(files.length && !confirm('Excluir permanentemente '+files.length+' vídeos do R2? Os links antigos deixarão de reproduzir.')) return;
-                for(const f of files){ await getStorage().deleteObject({Bucket:'aem',Key:f.Key}).promise(); report.textContent = ++removed+' de '+files.length+' excluídos.'; }
-                report.textContent = removed+' arquivos de vídeo excluídos.';
-                await carregarArquivosR2();
-            } catch(e){ report.textContent = removed+' excluídos. Falha: '+e.message; }
-            finally { this.disabled=false; }
-        };
-        window.addEventListener('admin-view', e => {
-            if (e.detail === 'leads') renderLeadDirectory();
-
-        });
-        onAuthStateChanged(auth, (user) => {
-            currentUser = user;
-            if (!user) { initAuth(); return; }
-            if (user) {
-                document.getElementById('admin-service-status').textContent='';
-                carregarCatalogoRealtime();
-                carregarBrandingRealtime();
-                carregarOrdemELogosCategorias();
-                carregarUsuariosRealtime();
-                carregarConfigAnunciosRealtime();
-                carregarIntegracaoYoutube();
-                onSnapshot(configDoc('salas'),snap=>{rooms=Object.assign(Object.create(null),snap.data());renderGallery();});
-                onSnapshot(maintenanceRef,snap => {
-                    maintenanceEnabled = snap.data()?.active === true;
-                    paintSwitch(); maintenanceSwitch.disabled = false;
-                }, () => maintenanceSwitch.textContent = 'Falha ao consultar disponibilidade');
-            }
-        });
-
-</script>
-<dialog id="deleteYoutubeDialog" class="m-auto rounded-xl bg-brand-panel text-white p-5 max-w-md"><form method="dialog"><h2 class="font-bold">Excluir permanentemente do YouTube?</h2><p id="deleteYoutubeInfo" class="my-3"></p><output id="deleteYoutubeStatus" aria-live="polite"></output><div class="flex gap-4 mt-4"><button value="cancel">Fechar</button><button type="button" id="deleteYoutubeConfirm" class="bg-red-700 rounded px-3 py-2">Autorizar exclusão</button></div></form></dialog></body>
-</html>
